@@ -1028,7 +1028,61 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     });
   }
 
-  // Background poller for auto-deploying new trending tokens
+  /**
+   * Mengirimkan penjelasan rinci saat terjadi kendala / error deploy ke Telegram
+   */
+  async sendDetailedErrorReport({ action, targetName, targetSymbol, errorMessage, recommendation, nextAction }) {
+    if (!config.telegramChatId || !this.bot) return;
+
+    let friendlyExplanation = 'Terjadi kendala teknis saat memproses transaksi on-chain atau komunikasi API.';
+    const lowerErr = (errorMessage || '').toLowerCase();
+
+    if (lowerErr.includes('insufficient funds') || lowerErr.includes('exceeds balance') || lowerErr.includes('gas * price + value')) {
+      friendlyExplanation = '<b>Saldo ETH Kurang:</b> Saldo ETH di wallet deployer tidak mencukupi untuk membayar biaya gas transaksi atau dev buy di Base network.';
+      if (!recommendation) recommendation = 'Segera isi sedikit saldo ETH ke wallet deployer di jaringan Base agar auto-deploy dapat terus berjalan lancar.';
+    } else if (lowerErr.includes('pool already exists') || lowerErr.includes('pair exists') || lowerErr.includes('already deployed') || lowerErr.includes('transfer_failed')) {
+      friendlyExplanation = '<b>Duplikasi Pool/Token:</b> Pool Uniswap v4 atau token dengan parameter/ticker ini sudah terdaftar on-chain di Base.';
+      if (!recommendation) recommendation = 'Bot otomatis mencari kandidat token lain yang belum terdaftar agar target deploy per jam terpenuhi.';
+    } else if (lowerErr.includes('timeout') || lowerErr.includes('econnreset') || lowerErr.includes('etimedout') || lowerErr.includes('fetch failed')) {
+      friendlyExplanation = '<b>Koneksi RPC/API Lambat:</b> Terjadi time out saat menghubungi node RPC Base atau server sumber data.';
+      if (!recommendation) recommendation = 'Koneksi jaringan Base sedang padat, bot otomatis beralih ke kandidat berikutnya atau mengulang dengan RPC cadangan.';
+    } else if (lowerErr.includes('429') || lowerErr.includes('rate limit')) {
+      friendlyExplanation = '<b>Rate Limit API:</b> Terlalu banyak permintaan API ke penyedia data dalam waktu singkat.';
+      if (!recommendation) recommendation = 'Bot otomatis menggunakan data cache dan mencoba sumber alternatif.';
+    } else if (lowerErr.includes('pinata') || lowerErr.includes('ipfs')) {
+      friendlyExplanation = '<b>Gagal Upload Logo IPFS:</b> Upload gambar/logo ke Pinata IPFS mengalami penolakan/kendala.';
+      if (!recommendation) recommendation = 'Bot otomatis menggunakan link gambar publik cadangan agar transaksi deploy tetap dapat dilanjutkan.';
+    } else if (lowerErr.includes('simulation failed') || lowerErr.includes('execution reverted')) {
+      friendlyExplanation = '<b>Simulasi Transaksi Ditolak:</b> Smart contract Clanker menolak transaksi pada tahap pra-eksekusi.';
+      if (!recommendation) recommendation = 'Parameter transaksi disesuaikan otomatis dan bot beralih ke kandidat token berikutnya.';
+    }
+
+    const message = 
+`🚨 <b>LAPORAN DETAIL KENDALA / ERROR SISTEM</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📍 <b>Aktivitas:</b> ${escapeHtml(action || 'Auto-Deploy On-Chain')}
+${targetName ? `🪙 <b>Target Token:</b> <b>${escapeHtml(targetName)}</b> (<code>$${escapeHtml(targetSymbol || 'UNKNOWN')}</code>)\n` : ''}⚠️ <b>Penjelasan Analitis:</b>
+${friendlyExplanation}
+
+🔍 <b>Pesan Error Teknis:</b>
+<code>${escapeHtml((errorMessage || 'Unknown Error').substring(0, 300))}</code>
+
+💡 <b>Tindakan Otomatis Bot:</b>
+${nextAction ? `• ${nextAction}` : '• Melewati kandidat ini dan langsung mencari kandidat baru potensial agar target wajib 1 token/jam tetap terpenuhi.'}
+${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+    try {
+      await this.bot.telegram.sendMessage(config.telegramChatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+    } catch (e) {
+      console.error('Failed to send error notification to Telegram:', e.message);
+    }
+  }
+
+  // Background poller for auto-deploying new trending tokens (Wajib minimal 1 token per jam)
   startBackgroundPoller(overrideMinutes) {
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
@@ -1038,7 +1092,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     const minutes = overrideMinutes || storage.getIntervalMinutes();
     const intervalMs = Math.max(minutes * 60 * 1000, 60000);
     const label = minutes >= 60 ? `${minutes / 60} Jam` : `${minutes} Menit`;
-    console.log(`[AutoDeploy Poller] Started. Checking multi-chain trending (Base, Solana, Pump.fun, CoinGecko, FOMO) every ${label} (${intervalMs / 1000}s)...`);
+    console.log(`[AutoDeploy Poller] Started. Checking multi-chain trending (Clanker.world, Base, Solana, Pump.fun, CoinGecko, FOMO) every ${label} (${intervalMs / 1000}s)...`);
 
     this.pollingInterval = setInterval(async () => {
       try {
@@ -1046,47 +1100,195 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         if (!state.autoDeploy) return;
         if (this.isProcessingCandidate) return;
 
-        if (!storage.canAutoDeployToday()) {
-          console.log('[AutoDeploy] Limit of 5 autonomous deployments per day reached. Skipping.');
+        this.isProcessingCandidate = true;
+
+        // 1. Cek saldo wallet sebelum eksekusi
+        const wallet = await clankerService.getWalletInfo();
+        if (!config.dryRun && wallet.hasWallet) {
+          const balanceNum = parseFloat(wallet.balanceEth) || 0;
+          if (balanceNum < 0.00005) {
+            await this.sendDetailedErrorReport({
+              action: `Pemeriksaan Saldo Pra-Deploy (${label})`,
+              errorMessage: `Saldo ETH Base tidak mencukupi: ${wallet.balanceEth} ETH (Dibutuhkan minimal ~0.0001 ETH untuk dev buy + gas)`,
+              recommendation: `Kirim sedikit ETH ke alamat deployer: ${wallet.address}`,
+              nextAction: 'Siklus deploy ditunda sementara sampai saldo mencukupi.'
+            });
+            return;
+          }
+        }
+
+        // 2. Ambil seluruh kandidat token trending dari semua platform
+        let allCandidates = [];
+        try {
+          allCandidates = await trendingService.getAllTrendingTokens();
+        } catch (fetchErr) {
+          await this.sendDetailedErrorReport({
+            action: 'Pengambilan Data Trending Lintas Platform',
+            errorMessage: fetchErr.message,
+            nextAction: 'Mencoba mengambil token cadangan langsung dari Clanker.world...'
+          });
+          allCandidates = await trendingService.getClankerWorldTrending().catch(() => []);
+        }
+
+        if (!allCandidates || allCandidates.length === 0) {
+          await this.sendDetailedErrorReport({
+            action: 'Scanning Trending Multi-Chain',
+            errorMessage: 'Tidak ada data trending yang ditemukan dari Clanker.world, GeckoTerminal, atau DexScreener.',
+            recommendation: 'Periksa koneksi internet server atau endpoint API sumber data.',
+            nextAction: 'Bot akan mencoba kembali pada jadwal pemeriksaan berikutnya.'
+          });
           return;
         }
 
-        const newCandidates = await trendingService.getNewTrendingCandidates();
-        if (!newCandidates || newCandidates.length === 0) return;
+        // 3. Loop kandidat: jika token sudah pernah dideploy dengan nama/symbol yang sama,
+        // otomatis langsung cari kandidat lain potensial sampai berhasil deploy minimal 1 token!
+        let deployedSuccessfully = false;
+        let attemptIndex = 0;
+        const maxAttempts = 15;
+        const skippedDuplicates = [];
 
-        const candidate = newCandidates[0];
-        this.isProcessingCandidate = true;
+        for (const candidate of allCandidates) {
+          if (deployedSuccessfully || attemptIndex >= maxAttempts) break;
 
-        storage.incrementAutoDeployCount();
+          // Cek apakah token dengan nama atau ticker ini sudah pernah dideploy
+          if (storage.isTokenAlreadyDeployed(candidate.symbol, candidate.name)) {
+            skippedDuplicates.push(`${candidate.name} ($${candidate.symbol})`);
+            console.log(`[AutoDeploy] Token "${candidate.name}" ($${candidate.symbol}) sudah pernah di-deploy. Otomatis mencari kandidat potensial berikutnya...`);
+            continue; // Langsung lewati dan cari kandidat berikutnya!
+          }
 
-        console.log(`[AutoDeploy] New trending token detected from ${candidate.sourceType}: ${candidate.name} ($${candidate.symbol})!`);
+          attemptIndex++;
+          console.log(`[AutoDeploy] Mencoba deploy kandidat #${attemptIndex}: "${candidate.name}" ($${candidate.symbol}) dari ${candidate.sourceType}...`);
 
-        if (config.telegramChatId && this.bot) {
-          await this.bot.telegram.sendMessage(
-            config.telegramChatId,
-            `🔥 <b>NEW MULTI-CHAIN TRENDING TERDETEKSI!</b>\n\n• Token: <b>${escapeHtml(candidate.name)}</b> (<code>$${escapeHtml(candidate.symbol)}</code>)\n• Platform Asal: <b>${escapeHtml(candidate.sourceType)}</b> (${candidate.sourceNetwork})\n• Volume 24j: <b>$${Number(candidate.volume24h).toLocaleString()}</b>\n\n<i>Memulai auto-deploy ke Base Layer 2 via Clanker v4... (Limit Harian: ${storage.getState().autoDeployCount || 1}/5)</i>`,
-            { parse_mode: 'HTML' }
-          );
+          // Beritahu Telegram kandidat yang sedang diproses
+          if (config.telegramChatId && this.bot) {
+            let notice = `⚡ <b>AUTODEPLOY SIKLUS RUTIN (MINIMAL 1 JAM = 1 TOKEN)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            if (skippedDuplicates.length > 0) {
+              notice += `ℹ️ <i>Melewati ${skippedDuplicates.length} token yang sudah pernah di-deploy (${skippedDuplicates.slice(0, 3).join(', ')}${skippedDuplicates.length > 3 ? '...' : ''}). Mencari kandidat baru potensial:</i>\n\n`;
+            }
+            notice += `🎯 <b>Kandidat Terpilih:</b> <b>${escapeHtml(candidate.name)}</b> (<code>$${escapeHtml(candidate.symbol)}</code>)\n`;
+            notice += `• Sumber: <b>${escapeHtml(candidate.sourceType)}</b> (${candidate.sourceNetwork})\n`;
+            notice += `• Volume 24j: <b>$${Number(candidate.volume24h).toLocaleString()}</b>\n\n`;
+            notice += `⏳ <i>Mengeksekusi deploy ke Base Layer 2 via Clanker v4...</i>`;
+            await this.bot.telegram.sendMessage(config.telegramChatId, notice, { parse_mode: 'HTML' }).catch(() => {});
+          }
+
+          // Eksekusi deploy token
+          const results = await clankerService.deployTrendingBatch(candidate);
+          const hasSuccess = results && results.some(r => r.success);
+
+          if (hasSuccess) {
+            deployedSuccessfully = true;
+            storage.incrementAutoDeployCount();
+
+            // Kirim notifikasi sukses lengkap ke Telegram
+            if (config.telegramChatId && this.bot) {
+              let summary = `🎉 <b>AUTO-DEPLOY BERHASIL! (Target 1 Token/Jam Terpenuhi)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+              if (skippedDuplicates.length > 0) {
+                summary += `ℹ️ <i>Melewati ${skippedDuplicates.length} token yang sudah pernah ada agar tidak terjadi duplikasi.</i>\n\n`;
+              }
+              for (const res of results) {
+                if (res.success) {
+                  summary += `✅ <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\n`;
+                  summary += `• Contract: <code>${res.tokenAddress}</code>\n`;
+                  summary += `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
+                } else {
+                  summary += `⚠️ <i>Batch variasi gagal: ${escapeHtml(res.error || 'Unknown')}</i>\n\n`;
+                }
+              }
+              await this.bot.telegram.sendMessage(config.telegramChatId, summary, {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+              }).catch(() => {});
+            }
+            break; // Selesai! Target 1 token tercapai.
+          } else {
+            // Deploy kandidat ini gagal! Kirim penjelasan detail ke Telegram lalu lanjut cari kandidat berikutnya
+            const firstError = results[0]?.error || 'Penyedia RPC / Smart contract Clanker menolak transaksi';
+            await this.sendDetailedErrorReport({
+              action: `Deploy Kandidat #${attemptIndex}`,
+              targetName: candidate.name,
+              targetSymbol: candidate.symbol,
+              errorMessage: firstError,
+              nextAction: 'Otomatis langsung mencari dan mengeksekusi kandidat potensial berikutnya agar target 1 token per jam tetap tercapai.'
+            });
+            console.log(`[AutoDeploy] Deploy gagal untuk "${candidate.name}": ${firstError}. Lanjut ke kandidat berikutnya...`);
+          }
         }
 
-        const results = await clankerService.deployTrendingBatch(candidate);
+        // 4. JIKA SEMUA KANDIDAT SUDAH PERNAH DIDEPLOY ATAU GAGAL:
+        // Bot TIDAK boleh menyerah, karena setiap minimal 1 jam bot WAJIB deploy 1 token!
+        // Buat kandidat berbasis AI Alpha unik agar target deploy 1 jam pasti tercapai!
+        if (!deployedSuccessfully) {
+          console.log('[AutoDeploy] Semua kandidat trending umum sudah pernah dideploy / gagal. Menghasilkan kandidat AI Alpha unik baru agar target wajib 1 jam tetap terpenuhi...');
+          
+          const memory = aiEngine.getMemory();
+          const keywords = (memory.successfulPatterns?.topKeywords || ['BASE', 'ALPHA', 'CLANKER', 'AI']).filter(k => k.length > 2);
+          const randomKw1 = keywords[Math.floor(Math.random() * keywords.length)] || 'BASE';
+          const randomKw2 = keywords[Math.floor(Math.random() * keywords.length)] || 'ALPHA';
+          const uniqueSuffix = Date.now().toString().slice(-4);
+          
+          const aiCandidate = {
+            name: `${randomKw1} ${randomKw2}`,
+            symbol: `${randomKw1.slice(0, 3)}${randomKw2.slice(0, 2)}${uniqueSuffix.slice(-1)}`.toUpperCase(),
+            imageUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/295953fa-15ed-4d3c-241d-b6c1758c6200/original',
+            volume24h: '10000',
+            sourceType: 'AI Autonomous Alpha (Anti-Skip Guard)',
+            sourceNetwork: 'BASE',
+            poolAddress: `ai_generated_${Date.now()}`
+          };
 
-        if (config.telegramChatId && this.bot) {
-          let summary = `🎉 <b>AUTO-DEPLOY MULTI-CHAIN SELESAI!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-          for (const res of results) {
-            if (res.success) {
-              summary += `✅ <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\nContract: <code>${res.tokenAddress}</code>\n<a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a>\n\n`;
-            } else {
-              summary += `❌ <b>${escapeHtml(res.targetName)}</b>: Gagal (${escapeHtml(res.error)})\n\n`;
-            }
+          if (config.telegramChatId && this.bot) {
+            await this.bot.telegram.sendMessage(
+              config.telegramChatId,
+              `🤖 <b>MEMENUHI TARGET WAJIB (1 JAM = 1 TOKEN)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `ℹ️ <i>Semua token trending reguler saat ini sudah pernah dideploy sebelumnya (${skippedDuplicates.length} token dilewati).\n` +
+              `Sesuai aturan wajib deploy tiap jam, AI membentuk token Alpha potensial baru:</i>\n\n` +
+              `🪙 <b>${escapeHtml(aiCandidate.name)}</b> (<code>$${escapeHtml(aiCandidate.symbol)}</code>)\n` +
+              `⏳ <i>Mengeksekusi deploy ke Base...</i>`,
+              { parse_mode: 'HTML' }
+            ).catch(() => {});
           }
-          await this.bot.telegram.sendMessage(config.telegramChatId, summary, {
-            parse_mode: 'HTML',
-            disable_web_page_preview: true
-          });
+
+          const fallbackResults = await clankerService.deployTrendingBatch(aiCandidate);
+          if (fallbackResults && fallbackResults.some(r => r.success)) {
+            deployedSuccessfully = true;
+            storage.incrementAutoDeployCount();
+
+            if (config.telegramChatId && this.bot) {
+              let summary = `🎉 <b>AUTO-DEPLOY BERHASIL (Target 1 Jam Tercapai!)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+              for (const res of fallbackResults) {
+                if (res.success) {
+                  summary += `✅ <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\n` +
+                             `• Contract: <code>${res.tokenAddress}</code>\n` +
+                             `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
+                }
+              }
+              await this.bot.telegram.sendMessage(config.telegramChatId, summary, {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+              }).catch(() => {});
+            }
+          } else {
+            const fbError = fallbackResults[0]?.error || 'Simulasi atau transaksi ditolak';
+            await this.sendDetailedErrorReport({
+              action: 'Deploy AI Autonomous Fallback',
+              targetName: aiCandidate.name,
+              targetSymbol: aiCandidate.symbol,
+              errorMessage: fbError,
+              recommendation: 'Periksa saldo ETH atau stabilitas RPC Base.',
+              nextAction: 'Bot akan mengulang kembali pada jam berikutnya.'
+            });
+          }
         }
       } catch (err) {
-        console.error('[AutoDeploy Poller Error]:', err.message);
+        console.error('[AutoDeploy Poller Error]:', err);
+        await this.sendDetailedErrorReport({
+          action: 'Siklus Auto-Deploy Rutin',
+          errorMessage: err.message || String(err),
+          recommendation: 'Sistem mengalami error tak terduga. Bot akan mencoba me-recover pada siklus selanjutnya.',
+          nextAction: 'Melakukan log error dan mereset status poller.'
+        });
       } finally {
         this.isProcessingCandidate = false;
       }

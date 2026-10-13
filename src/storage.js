@@ -74,12 +74,10 @@ export class Storage {
   }
 
   canAutoDeployToday() {
+    // Sesuai aturan: setiap minimal 1 jam wajib deploy 1 token (24/7 continuous mode)
     const state = this.getState();
-    const today = new Date().toISOString().split('T')[0];
-    if (state.autoDeployDate !== today) {
-      return true;
-    }
-    return (state.autoDeployCount || 0) < 5;
+    const maxDaily = Number(process.env.MAX_DAILY_DEPLOYS || 100);
+    return (state.autoDeployCount || 0) < maxDaily;
   }
 
   incrementAutoDeployCount() {
