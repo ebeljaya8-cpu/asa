@@ -1,0 +1,64 @@
+{
+  "autoDeploy": true,
+  "lastCheckedPoolId": null,
+  "totalDeployedCount": 58,
+  "settings": {
+    "devBuyEth": 0.000001,
+    "permanentFeePercent": 3,
+    "sniperTaxDurationSec": 120,
+    "creatorVaultPercent": 5,
+    "repeatCount": 2,
+    "repeatSuffix": "BASE"
+  },
+  "intervalMinutes": 60,
+  "aiMemory": {
+    "marketAnalysisHistory": [
+      {
+        "time": "2026-10-12T00:13:44.454Z",
+        "score": 100,
+        "decision": "DEPLOY_AGGRESSIVE"
+      }
+    ],
+    "successfulPatterns": {
+      "topKeywords": [
+        "FINANCE",
+        "CAT",
+        "CLAUS",
+        "CLAUDIA",
+        "DNA",
+        "CNPY",
+        "CASH",
+        "TENEV",
+        "GIGA",
+        "AEON",
+        "TOKEN",
+        "SHAREX",
+        "ARK",
+        "TORCH",
+        "TAILOR",
+        "THE",
+        "NETWORK",
+        "TAU",
+        "BACTERIA",
+        "HIGGSPAD",
+        "USD𖼊",
+        "KEETA",
+        "LAYERZERO",
+        "NOCK",
+        "AI"
+      ],
+      "avgVolumeThreshold": 5000,
+      "preferredCategories": [
+        "pump",
+        "base",
+        "coingecko"
+      ]
+    },
+    "learnedDeployCount": 1462,
+    "highFomoCount": 0,
+    "lastAutonomousCheck": 1791271015223
+  },
+  "repeatSuffix": "Network",
+  "autoDeployDate": "2026-10-12",
+  "autoDeployCount": 5
+}

@@ -1,14 +1,22 @@
 {
-  "name": "warplet",
+  "name": "clanker-gecko-bot",
   "version": "1.0.0",
-  "type": "module",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "start": "node warplet.js"
+    "start": "node index.js",
+    "test-trending": "node -e \"import('./src/geckoService.js').then(m => m.geckoService.getTrendingTokens()).then(r => console.log(r.slice(0, 3)))\"",
+    "test-deploy": "node -e \"import('./src/clankerService.js').then(m => m.clankerService.deployTrendingBatch({ name: 'Demo Token', symbol: 'DEMO', imageUrl: 'https://example.com/logo.png', poolAddress: '0x123' })).then(r => console.log(JSON.stringify(r, null, 2)))\""
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
   "dependencies": {
-    "axios": "^1.7.0",
-    "dotenv": "^16.4.0",
-    "fast-csv": "^5.0.0",
-    "p-limit": "^4.0.0"
+    "clanker-sdk": "^4.2.19",
+    "dotenv": "^18.0.5",
+    "node-telegram-bot-api": "^2.1.0",
+    "telegraf": "^4.16.3",
+    "viem": "^2.57.3"
   }
 }
