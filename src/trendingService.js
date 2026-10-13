@@ -450,12 +450,81 @@ export class TrendingService {
   }
 
   /**
+   * 4.8. Fetch DexScreener Trending All-Chain (Solana, Base, Ethereum, BSC, Arbitrum, etc.)
+   * Mengambil token top-boosted dan active profiles lintas chain langsung dengan detail DEX
+   */
+  async getDexScreenerAllChainTrending() {
+    const cacheKey = 'dx_all_chain_trending';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    try {
+      const [boosts, profiles] = await Promise.all([
+        this.safeFetchJson(`${this.dexScreenerBase}/token-boosts/top/v1`),
+        this.safeFetchJson(`${this.dexScreenerBase}/token-profiles/latest/v1`)
+      ]);
+
+      const addresses = new Set();
+      (boosts || []).slice(0, 15).forEach(b => b.tokenAddress && addresses.add(b.tokenAddress));
+      (profiles || []).slice(0, 15).forEach(p => p.tokenAddress && addresses.add(p.tokenAddress));
+
+      const addrList = Array.from(addresses).slice(0, 30);
+      if (addrList.length === 0) return [];
+
+      const pairsData = await this.safeFetchJson(`${this.dexScreenerBase}/latest/dex/tokens/${addrList.join(',')}`);
+      if (!pairsData || !pairsData.pairs) return [];
+
+      const results = [];
+      const seen = new Set();
+
+      for (const pair of pairsData.pairs) {
+        const baseToken = pair.baseToken;
+        if (!baseToken) continue;
+
+        const name = (baseToken.name || '').trim();
+        const symbol = (baseToken.symbol || '').trim().toUpperCase();
+        if (!name || !symbol || seen.has(symbol)) continue;
+        seen.add(symbol);
+
+        const chainId = (pair.chainId || 'MULTI').toUpperCase();
+        const dexId = (pair.dexId || 'DEX').toUpperCase();
+        const volume24h = parseFloat(pair.volume?.h24 || '0');
+        const imageUrl = pair.info?.imageUrl || pair.info?.header || 'https://assets.coingecko.com/coins/images/placeholder.png';
+
+        results.push({
+          id: `dxall_${pair.chainId?.toLowerCase()}_${pair.pairAddress?.substring(0, 8) || symbol.toLowerCase()}`,
+          name,
+          symbol,
+          imageUrl,
+          priceUsd: pair.priceUsd ? String(pair.priceUsd) : '0',
+          fdvUsd: pair.fdv ? String(pair.fdv) : '0',
+          volume24h: volume24h.toFixed(2),
+          sourceNetwork: chainId,
+          sourceType: `DexScreener All-Chain (${chainId}/${dexId})`,
+          poolAddress: pair.pairAddress || pair.baseToken?.address,
+          poolName: `${symbol} on ${dexId} (${chainId})`,
+          sourceUrl: pair.url || `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`
+        });
+      }
+
+      this.cache.set(cacheKey, { data: results, time: Date.now() });
+      return results;
+    } catch (e) {
+      console.warn('Error fetching DexScreener all-chain trending:', e.message);
+      return [];
+    }
+  }
+
+  /**
    * 5. Get Combined All-in-One Multi-Chain & Multi-Platform Trending
-   * Aggregates Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
+   * Aggregates Clanker.world, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
    */
   async getAllTrendingTokens() {
     const [
       clankerWorld,
+      dxAllChain,
       baseGecko,
       solanaGecko,
       coinGecko,
@@ -468,6 +537,7 @@ export class TrendingService {
       bscGecko
     ] = await Promise.all([
       this.getClankerWorldTrending(),
+      this.getDexScreenerAllChainTrending(),
       this.getGeckoTerminalTrending('base'),
       this.getGeckoTerminalTrending('solana'),
       this.getCoinGeckoTrending(),
@@ -486,6 +556,7 @@ export class TrendingService {
     // Round-robin mix from each source for variety
     const maxLen = Math.max(
       clankerWorld.length,
+      dxAllChain.length,
       baseGecko.length,
       solanaGecko.length,
       coinGecko.length,
@@ -501,7 +572,8 @@ export class TrendingService {
     for (let i = 0; i < maxLen; i++) {
       const candidates = [
         clankerWorld[i], // Prioritize official Clanker.world trending now
-        dxNewBase[i], // prioritize new pairs
+        dxAllChain[i],   // DexScreener All-Chain trending (Solana, Base, ETH, BSC)
+        dxNewBase[i],    // DexScreener new pairs
         xAlpha[i],
         baseGecko[i],
         coinGecko[i],

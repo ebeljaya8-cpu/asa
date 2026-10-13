@@ -265,6 +265,11 @@ export class TelegramBotApp {
       await this.sendTrendingList(ctx, 'clanker');
     });
 
+    bot.action('cmd_trending_dxall', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTrendingList(ctx, 'dxall');
+    });
+
     bot.action('cmd_trending_base', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendTrendingList(ctx, 'base');
@@ -870,16 +875,17 @@ Ditemukan <b>${activeTokens.length} Token</b> dengan aktivitas likuiditas/volume
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideploy ke <b>Base via Clanker</b>:
 
-🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (Clanker.world, Base, Solana, ETH, BSC, Pump.fun, DexScreener, CoinGecko)
+🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (Clanker.world, DexScreener All-Chain, Base, Solana, ETH, BSC, Pump.fun, CoinGecko)
 🤖 <b>2. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j &amp; transaksi on-chain di Clanker.world
-🔵 <b>3. Base Network:</b> GeckoTerminal Base trending pools
-💊 <b>4. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
-🦎 <b>5. CoinGecko Global:</b> Trending search &amp; coins global (Robinhood/Top Gainers)
-🚀 <b>6. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
-🆕 <b>7. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
-💎 <b>8. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
-🟡 <b>9. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
-🦄 <b>10. Multi-DEX (Uniswap/Raydium/Robinhood):</b> Top DEX trending multi-platform
+🦅 <b>3. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
+🔵 <b>4. Base Network:</b> GeckoTerminal Base trending pools
+💊 <b>5. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
+🦎 <b>6. CoinGecko Global:</b> Trending search &amp; coins global (Robinhood/Top Gainers)
+🚀 <b>7. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
+🆕 <b>8. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
+💎 <b>9. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
+🟡 <b>10. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
+🦄 <b>11. Multi-DEX (Uniswap/Raydium/Robinhood):</b> Top DEX trending multi-platform
 
 👇 <i>Klik kategori pilihan Anda:</i>`;
 
@@ -888,7 +894,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         Markup.button.callback('🌐 🔥 Semua Trending (All-in-One)', 'cmd_trending_all')
       ],
       [
-        Markup.button.callback('🤖 Clanker.world Top Trending', 'cmd_trending_clanker')
+        Markup.button.callback('🤖 Clanker.world Top Trending', 'cmd_trending_clanker'),
+        Markup.button.callback('🦅 DexScreener All-Chain', 'cmd_trending_dxall')
       ],
       [
         Markup.button.callback('🔵 Base Trending', 'cmd_trending_base'),
@@ -917,6 +924,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     const labels = {
       all: '🌐 Semua Multi-Chain & Platform',
       clanker: '🤖 Clanker.world Top Trending Now',
+      dxall: '🦅 DexScreener Trending All-Chain (Lintas Jaringan)',
       base: '🔵 GeckoTerminal (Base)',
       pump: '💊 Pump.fun & Solana Meme',
       coingecko: '🦎 CoinGecko Global Trending',
@@ -933,6 +941,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     let tokens = [];
     if (category === 'clanker') {
       tokens = await trendingService.getClankerWorldTrending();
+    } else if (category === 'dxall') {
+      tokens = await trendingService.getDexScreenerAllChainTrending();
     } else if (category === 'base') {
       tokens = await trendingService.getGeckoTerminalTrending('base');
     } else if (category === 'pump') {
