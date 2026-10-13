@@ -7,12 +7,63 @@ export class TrendingService {
     this.geckoTerminalBase = 'https://api.geckoterminal.com/api/v2';
     this.coinGeckoBase = 'https://api.coingecko.com/api/v3';
     this.dexScreenerBase = 'https://api.dexscreener.com';
+    this.clankerWorldBase = 'https://www.clanker.world/api';
     this.cache = new Map();
     this.cacheExpiry = 60 * 1000; // 1 minute in-memory cache
   }
 
   async getXAlphaTrending() {
     return xRadarService.getXAlphaTrending();
+  }
+
+  /**
+   * 0. Fetch Top Trending Now directly from Clanker.world (Volume 24h & Transactions)
+   */
+  async getClankerWorldTrending() {
+    const cacheKey = 'clanker_world_trending';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    const url = `${this.clankerWorldBase}/tokens?sortBy=volume-h24&sort=desc&page=1&limit=20`;
+    const json = await this.safeFetchJson(url);
+    if (!json || !json.data) return [];
+
+    const results = [];
+    const seen = new Set();
+
+    for (const item of json.data) {
+      const name = (item.name || '').trim();
+      const symbol = (item.symbol || '').trim().toUpperCase();
+      const address = item.contract_address;
+      if (!name || !symbol || seen.has(symbol)) continue;
+      seen.add(symbol);
+
+      const market = item.related?.market || {};
+      const volume24h = parseFloat(market.volume24h || '0');
+      const priceUsd = market.priceUsd ? String(market.priceUsd) : (item.priceUsd ? String(item.priceUsd) : '0');
+      const fdvUsd = market.marketCap ? String(market.marketCap) : '0';
+      const imageUrl = item.img_url || 'https://assets.coingecko.com/coins/images/placeholder.png';
+
+      results.push({
+        id: `clanker_${address ? address.substring(0, 10).toLowerCase() : symbol.toLowerCase()}`,
+        name,
+        symbol,
+        imageUrl,
+        priceUsd,
+        fdvUsd,
+        volume24h: volume24h.toFixed(2),
+        sourceNetwork: 'BASE',
+        sourceType: 'Clanker.world Trending Now',
+        poolAddress: address || item.pool_address || '',
+        poolName: `${symbol} (Clanker.world Top Volume)`,
+        sourceUrl: `https://www.clanker.world/clanker/${address || ''}`
+      });
+    }
+
+    this.cache.set(cacheKey, { data: results, time: Date.now() });
+    return results;
   }
 
   /**
@@ -404,6 +455,7 @@ export class TrendingService {
    */
   async getAllTrendingTokens() {
     const [
+      clankerWorld,
       baseGecko,
       solanaGecko,
       coinGecko,
@@ -415,6 +467,7 @@ export class TrendingService {
       ethGecko,
       bscGecko
     ] = await Promise.all([
+      this.getClankerWorldTrending(),
       this.getGeckoTerminalTrending('base'),
       this.getGeckoTerminalTrending('solana'),
       this.getCoinGeckoTrending(),
@@ -432,6 +485,7 @@ export class TrendingService {
 
     // Round-robin mix from each source for variety
     const maxLen = Math.max(
+      clankerWorld.length,
       baseGecko.length,
       solanaGecko.length,
       coinGecko.length,
@@ -446,6 +500,7 @@ export class TrendingService {
 
     for (let i = 0; i < maxLen; i++) {
       const candidates = [
+        clankerWorld[i], // Prioritize official Clanker.world trending now
         dxNewBase[i], // prioritize new pairs
         xAlpha[i],
         baseGecko[i],
