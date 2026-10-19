@@ -518,12 +518,261 @@ export class TrendingService {
   }
 
   /**
+   * 4.9. Fetch Robinhood Network Trending (GeckoTerminal + DexScreener Robinhood L2)
+   */
+  async getRobinhoodTrending() {
+    const cacheKey = 'gt_rh_trending';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    try {
+      const results = [];
+      const seen = new Set();
+
+      // 1. GeckoTerminal Trending Pools on Robinhood network
+      const gtPools = await this.getGeckoTerminalTrending('robinhood');
+      for (const t of gtPools) {
+        if (!seen.has(t.symbol)) {
+          seen.add(t.symbol);
+          results.push({
+            ...t,
+            sourceNetwork: 'ROBINHOOD',
+            sourceType: 'GeckoTerminal (Robinhood L2)'
+          });
+        }
+      }
+
+      // 2. DexScreener Search Robinhood pairs as supplement
+      const dxUrl = `${this.dexScreenerBase}/latest/dex/search?q=robinhood`;
+      const dxJson = await this.safeFetchJson(dxUrl);
+      if (dxJson && dxJson.pairs) {
+        for (const pair of dxJson.pairs) {
+          if (pair.chainId !== 'robinhood') continue;
+          const baseToken = pair.baseToken;
+          if (!baseToken || !baseToken.symbol) continue;
+          const symbol = baseToken.symbol.trim().toUpperCase();
+          if (seen.has(symbol)) continue;
+          seen.add(symbol);
+
+          const volume24h = parseFloat(pair.volume?.h24 || '0');
+          results.push({
+            id: `rh_${pair.pairAddress?.substring(0, 10) || symbol.toLowerCase()}`,
+            name: baseToken.name || symbol,
+            symbol,
+            imageUrl: pair.info?.imageUrl || pair.info?.header || 'https://assets.coingecko.com/coins/images/placeholder.png',
+            priceUsd: pair.priceUsd || '0',
+            fdvUsd: pair.fdv ? String(pair.fdv) : '0',
+            volume24h: volume24h.toFixed(2),
+            sourceNetwork: 'ROBINHOOD',
+            sourceType: 'DexScreener (Robinhood L2)',
+            poolAddress: pair.pairAddress,
+            poolName: `${symbol} on Robinhood`,
+            sourceUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`
+          });
+        }
+      }
+
+      this.cache.set(cacheKey, { data: results, time: Date.now() });
+      return results;
+    } catch (e) {
+      console.warn('Error fetching Robinhood trending:', e.message);
+      return [];
+    }
+  }
+
+  /**
+   * 4.10. Fetch ARC Network Trending (GeckoTerminal + DexScreener ARC Layer-1 / Circle EVM)
+   */
+  async getArcTrending() {
+    const cacheKey = 'gt_arc_trending';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    try {
+      const results = [];
+      const seen = new Set();
+
+      // 1. GeckoTerminal Trending Pools on ARC network
+      const gtPools = await this.getGeckoTerminalTrending('arc');
+      for (const t of gtPools) {
+        if (!seen.has(t.symbol)) {
+          seen.add(t.symbol);
+          results.push({
+            ...t,
+            sourceNetwork: 'ARC',
+            sourceType: 'GeckoTerminal (ARC Network)'
+          });
+        }
+      }
+
+      // 2. DexScreener Search ARC pairs as supplement
+      const dxUrl = `${this.dexScreenerBase}/latest/dex/search?q=arc`;
+      const dxJson = await this.safeFetchJson(dxUrl);
+      if (dxJson && dxJson.pairs) {
+        for (const pair of dxJson.pairs) {
+          if (pair.chainId !== 'arc') continue;
+          const baseToken = pair.baseToken;
+          if (!baseToken || !baseToken.symbol) continue;
+          const symbol = baseToken.symbol.trim().toUpperCase();
+          if (seen.has(symbol)) continue;
+          seen.add(symbol);
+
+          const volume24h = parseFloat(pair.volume?.h24 || '0');
+          results.push({
+            id: `arc_${pair.pairAddress?.substring(0, 10) || symbol.toLowerCase()}`,
+            name: baseToken.name || symbol,
+            symbol,
+            imageUrl: pair.info?.imageUrl || pair.info?.header || 'https://assets.coingecko.com/coins/images/placeholder.png',
+            priceUsd: pair.priceUsd || '0',
+            fdvUsd: pair.fdv ? String(pair.fdv) : '0',
+            volume24h: volume24h.toFixed(2),
+            sourceNetwork: 'ARC',
+            sourceType: 'DexScreener (ARC Network)',
+            poolAddress: pair.pairAddress,
+            poolName: `${symbol} on ARC`,
+            sourceUrl: pair.url || `https://dexscreener.com/arc/${pair.pairAddress}`
+          });
+        }
+      }
+
+      this.cache.set(cacheKey, { data: results, time: Date.now() });
+      return results;
+    } catch (e) {
+      console.warn('Error fetching ARC trending:', e.message);
+      return [];
+    }
+  }
+
+  /**
+   * 4.11. Fetch Kategori Coin Baru dengan Exposure Tinggi (All-Chain Fresh & High-Exposure)
+   * Mengumpulkan token yang berumur muda (< 72 jam) dengan volume, transaksi, dan exposure/boost tertinggi
+   * dari SEMUA jaringan (Solana, Base, Ethereum, BSC, Robinhood, ARC, dll.)
+   */
+  async getFreshHighExposureTrending() {
+    const cacheKey = 'fresh_high_exposure_trending';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    try {
+      const [boostsTop, boostsLatest, profiles] = await Promise.all([
+        this.safeFetchJson(`${this.dexScreenerBase}/token-boosts/top/v1`),
+        this.safeFetchJson(`${this.dexScreenerBase}/token-boosts/latest/v1`),
+        this.safeFetchJson(`${this.dexScreenerBase}/token-profiles/latest/v1`)
+      ]);
+
+      const boostMap = new Map();
+      (boostsTop || []).forEach(b => {
+        if (b.tokenAddress) {
+          boostMap.set(b.tokenAddress, { totalAmount: b.totalAmount || 0, icon: b.icon || b.header });
+        }
+      });
+      (boostsLatest || []).forEach(b => {
+        if (b.tokenAddress && !boostMap.has(b.tokenAddress)) {
+          boostMap.set(b.tokenAddress, { totalAmount: b.totalAmount || 0, icon: b.icon || b.header });
+        }
+      });
+      (profiles || []).forEach(p => {
+        if (p.tokenAddress && !boostMap.has(p.tokenAddress)) {
+          boostMap.set(p.tokenAddress, { totalAmount: 0, icon: p.icon || p.header });
+        }
+      });
+
+      const addressList = Array.from(boostMap.keys()).slice(0, 30);
+      if (addressList.length === 0) return [];
+
+      const pairsRes = await this.safeFetchJson(`${this.dexScreenerBase}/latest/dex/tokens/${addressList.join(',')}`);
+      if (!pairsRes || !pairsRes.pairs) return [];
+
+      const now = Date.now();
+      const candidates = [];
+      const seen = new Set();
+
+      for (const pair of pairsRes.pairs) {
+        const baseToken = pair.baseToken;
+        if (!baseToken || !baseToken.symbol) continue;
+        const symbol = baseToken.symbol.trim().toUpperCase();
+        if (seen.has(symbol)) continue;
+
+        const createdAt = pair.pairCreatedAt || 0;
+        const ageMs = createdAt > 0 ? (now - createdAt) : 0;
+        const ageHours = ageMs / (1000 * 3600);
+
+        const volume24h = parseFloat(pair.volume?.h24 || '0');
+        const totalTxns = (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0);
+        const boostInfo = boostMap.get(baseToken.address) || {};
+        const boostAmount = boostInfo.totalAmount || 0;
+
+        // Kriteria: Umur baru (<= 72 jam jika createdAt ada, atau rilis baru di profile)
+        // dan exposure tinggi (volume >= $5000, transaksi >= 50, atau boost >= 10)
+        const isNew = createdAt > 0 ? ageHours <= 72 : true;
+        const hasHighExposure = volume24h >= 5000 || totalTxns >= 50 || boostAmount >= 10;
+
+        if (isNew && hasHighExposure) {
+          seen.add(symbol);
+
+          let ageStr = '';
+          if (createdAt > 0) {
+            if (ageHours < 1) {
+              ageStr = `${Math.max(1, Math.round(ageHours * 60))} Menit`;
+            } else if (ageHours < 24) {
+              ageStr = `${ageHours.toFixed(1)} Jam`;
+            } else {
+              ageStr = `${(ageHours / 24).toFixed(1)} Hari`;
+            }
+          } else {
+            ageStr = 'Baru Rilis (<24j)';
+          }
+
+          const chainId = (pair.chainId || 'MULTI').toUpperCase();
+          const exposureScore = volume24h + (totalTxns * 50) + (boostAmount * 100);
+
+          candidates.push({
+            id: `fresh_${pair.chainId?.toLowerCase()}_${pair.pairAddress?.substring(0, 8) || symbol.toLowerCase()}`,
+            name: baseToken.name || symbol,
+            symbol,
+            imageUrl: pair.info?.imageUrl || pair.info?.header || boostInfo.icon || 'https://assets.coingecko.com/coins/images/placeholder.png',
+            priceUsd: pair.priceUsd ? String(pair.priceUsd) : '0',
+            fdvUsd: pair.fdv ? String(pair.fdv) : '0',
+            volume24h: volume24h.toFixed(2),
+            totalTxns,
+            age: ageStr,
+            exposureScore,
+            sourceNetwork: chainId,
+            sourceType: `Koin Baru Exposure Tinggi (${chainId})`,
+            poolAddress: pair.pairAddress || baseToken.address,
+            poolName: `${symbol} [Umur: ${ageStr} | ${totalTxns.toLocaleString()} Txns]`,
+            sourceUrl: pair.url || `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`
+          });
+        }
+      }
+
+      // Urutkan berdasarkan exposureScore tertinggi
+      candidates.sort((a, b) => b.exposureScore - a.exposureScore);
+
+      this.cache.set(cacheKey, { data: candidates, time: Date.now() });
+      return candidates;
+    } catch (e) {
+      console.warn('Error fetching fresh high exposure trending:', e.message);
+      return [];
+    }
+  }
+
+  /**
    * 5. Get Combined All-in-One Multi-Chain & Multi-Platform Trending
-   * Aggregates Clanker.world, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
+   * Aggregates Clanker.world, Fresh High-Exposure, Robinhood, ARC, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
    */
   async getAllTrendingTokens() {
     const [
       clankerWorld,
+      freshHighExposure,
+      robinhood,
+      arc,
       dxAllChain,
       baseGecko,
       solanaGecko,
@@ -537,6 +786,9 @@ export class TrendingService {
       bscGecko
     ] = await Promise.all([
       this.getClankerWorldTrending(),
+      this.getFreshHighExposureTrending(),
+      this.getRobinhoodTrending(),
+      this.getArcTrending(),
       this.getDexScreenerAllChainTrending(),
       this.getGeckoTerminalTrending('base'),
       this.getGeckoTerminalTrending('solana'),
@@ -556,6 +808,9 @@ export class TrendingService {
     // Round-robin mix from each source for variety
     const maxLen = Math.max(
       clankerWorld.length,
+      freshHighExposure.length,
+      robinhood.length,
+      arc.length,
       dxAllChain.length,
       baseGecko.length,
       solanaGecko.length,
@@ -571,9 +826,12 @@ export class TrendingService {
 
     for (let i = 0; i < maxLen; i++) {
       const candidates = [
-        clankerWorld[i], // Prioritize official Clanker.world trending now
-        dxAllChain[i],   // DexScreener All-Chain trending (Solana, Base, ETH, BSC)
-        dxNewBase[i],    // DexScreener new pairs
+        clankerWorld[i],       // Prioritize official Clanker.world trending now
+        freshHighExposure[i],  // Koin baru umur muda dengan exposure tinggi lintas chain
+        robinhood[i],          // Robinhood L2 trending
+        arc[i],                // ARC network trending
+        dxAllChain[i],         // DexScreener All-Chain trending (Solana, Base, ETH, BSC)
+        dxNewBase[i],          // DexScreener new pairs
         xAlpha[i],
         baseGecko[i],
         coinGecko[i],

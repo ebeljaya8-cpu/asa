@@ -76,9 +76,9 @@ export class TelegramBotApp {
     bot.command('help', async (ctx) => {
       const helpMsg = 
 `📖 <b>PANDUAN LENGKAP PERINTAH BOT:</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━
 • <code>/start</code> - Membuka dashboard utama & menu interaktif
-• <code>/trending</code> - Daftar token trending GeckoTerminal Base (+ Tombol Deploy)
+• <code>/trending</code> - Daftar token trending lintas platform (+ Tombol Deploy)
+  <i>Pilihan langsung: <code>/trending fresh</code>, <code>/trending robinhood</code>, <code>/trending arc</code>, <code>/trending base</code>, <code>/trending all</code></i>
 • <code>/autodeploy on</code> - Aktifkan auto-deploy otomatis jika ada trending baru
 • <code>/autodeploy off</code> - Matikan auto-deploy otomatis
 • <code>/interval [15|30|60|120]</code> - Atur frekuensi auto-deploy (15m, 30m, 1j, 2j)
@@ -118,6 +118,15 @@ export class TelegramBotApp {
       const parts = ctx.message.text.split(' ');
       const arg = parts[1]?.toLowerCase();
       if (arg) {
+        if (['rh', 'robinhood'].includes(arg)) {
+          return this.sendTrendingList(ctx, 'robinhood');
+        }
+        if (['arc'].includes(arg)) {
+          return this.sendTrendingList(ctx, 'arc');
+        }
+        if (['fresh', 'new', 'exposure', 'freshexp'].includes(arg)) {
+          return this.sendTrendingList(ctx, 'fresh');
+        }
         if (['pump', 'pumpfun', 'solana', 'meme'].includes(arg)) {
           return this.sendTrendingList(ctx, 'pump');
         }
@@ -258,6 +267,21 @@ export class TelegramBotApp {
     bot.action('cmd_trending_all', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendTrendingList(ctx, 'all');
+    });
+
+    bot.action(['cmd_trending_fresh', 'cmd_trending_freshexp'], async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTrendingList(ctx, 'fresh');
+    });
+
+    bot.action(['cmd_trending_rh', 'cmd_trending_robinhood'], async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTrendingList(ctx, 'robinhood');
+    });
+
+    bot.action('cmd_trending_arc', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTrendingList(ctx, 'arc');
     });
 
     bot.action('cmd_trending_clanker', async (ctx) => {
@@ -875,23 +899,33 @@ Ditemukan <b>${activeTokens.length} Token</b> dengan aktivitas likuiditas/volume
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideploy ke <b>Base via Clanker</b>:
 
-🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (Clanker.world, DexScreener All-Chain, Base, Solana, ETH, BSC, Pump.fun, CoinGecko)
-🤖 <b>2. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j &amp; transaksi on-chain di Clanker.world
-🦅 <b>3. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
-🔵 <b>4. Base Network:</b> GeckoTerminal Base trending pools
-💊 <b>5. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
-🦎 <b>6. CoinGecko Global:</b> Trending search &amp; coins global (Robinhood/Top Gainers)
-🚀 <b>7. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
-🆕 <b>8. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
-💎 <b>9. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
-🟡 <b>10. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
-🦄 <b>11. Multi-DEX (Uniswap/Raydium/Robinhood):</b> Top DEX trending multi-platform
+🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (Clanker, Koin Baru Fresh, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
+🔥 <b>2. Koin Baru Exposure Tinggi:</b> Token baru rilis (<72j) dengan volume &amp; transaksi masif dari jaringan manapun
+🏹 <b>3. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
+⚡ <b>4. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
+🤖 <b>5. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j &amp; transaksi on-chain di Clanker.world
+🦅 <b>6. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
+🔵 <b>7. Base Network:</b> GeckoTerminal Base trending pools
+💊 <b>8. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
+🦎 <b>9. CoinGecko Global:</b> Trending search &amp; coins global (Robinhood/Top Gainers)
+🚀 <b>10. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
+🆕 <b>11. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
+💎 <b>12. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
+🟡 <b>13. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
+🦄 <b>14. Multi-DEX (Uniswap/Raydium):</b> Top DEX trending multi-platform
 
 👇 <i>Klik kategori pilihan Anda:</i>`;
 
     await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
       [
         Markup.button.callback('🌐 🔥 Semua Trending (All-in-One)', 'cmd_trending_all')
+      ],
+      [
+        Markup.button.callback('🔥 Koin Baru Exposure Tinggi', 'cmd_trending_fresh')
+      ],
+      [
+        Markup.button.callback('🏹 Robinhood Network', 'cmd_trending_rh'),
+        Markup.button.callback('⚡ ARC Network', 'cmd_trending_arc')
       ],
       [
         Markup.button.callback('🤖 Clanker.world Top Trending', 'cmd_trending_clanker'),
@@ -923,6 +957,11 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
   async sendTrendingList(ctx, category = 'all') {
     const labels = {
       all: '🌐 Semua Multi-Chain & Platform',
+      fresh: '🔥 Koin Baru Exposure Tinggi (All-Chain Fresh & High Volume)',
+      freshexp: '🔥 Koin Baru Exposure Tinggi (All-Chain Fresh & High Volume)',
+      robinhood: '🏹 GeckoTerminal & DexScreener (Robinhood L2)',
+      rh: '🏹 GeckoTerminal & DexScreener (Robinhood L2)',
+      arc: '⚡ GeckoTerminal & DexScreener (ARC Network)',
       clanker: '🤖 Clanker.world Top Trending Now',
       dxall: '🦅 DexScreener Trending All-Chain (Lintas Jaringan)',
       base: '🔵 GeckoTerminal (Base)',
@@ -939,7 +978,13 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     await ctx.reply(`🔍 Mengambil data token trending [${labels[category] || category}]...`);
 
     let tokens = [];
-    if (category === 'clanker') {
+    if (category === 'robinhood' || category === 'rh') {
+      tokens = await trendingService.getRobinhoodTrending();
+    } else if (category === 'arc') {
+      tokens = await trendingService.getArcTrending();
+    } else if (category === 'fresh' || category === 'freshexp') {
+      tokens = await trendingService.getFreshHighExposureTrending();
+    } else if (category === 'clanker') {
       tokens = await trendingService.getClankerWorldTrending();
     } else if (category === 'dxall') {
       tokens = await trendingService.getDexScreenerAllChainTrending();
@@ -966,7 +1011,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     }
 
     if (!tokens || tokens.length === 0) {
-      return ctx.replyWithHTML(`⚠️ Tidak ada token trending yang ditemukan untuk kategori <b>${labels[category]}</b> saat ini.`);
+      return ctx.replyWithHTML(`⚠️ Tidak ada token trending yang ditemukan untuk kategori <b>${labels[category] || category}</b> saat ini.`);
     }
 
     this.trendingCache = tokens.slice(0, 6);
@@ -974,11 +1019,20 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     await ctx.replyWithHTML(`🔥 <b>TOP TRENDING TOKENS [${labels[category] || category}]:</b>`);
 
     for (const [index, token] of this.trendingCache.entries()) {
-      const caption = 
+      let caption = 
 `#${index + 1} 🪙 <b>${escapeHtml(token.name)}</b> (<code>$${escapeHtml(token.symbol)}</code>)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Sumber: <b>${escapeHtml(token.sourceType)}</b>
-• Network Asal: <b>${escapeHtml(token.sourceNetwork)}</b>
+• Network Asal: <b>${escapeHtml(token.sourceNetwork)}</b>`;
+
+      if (token.age) {
+        caption += `\n• Umur Token: <b>${escapeHtml(token.age)}</b>`;
+      }
+      if (token.totalTxns) {
+        caption += `\n• Total Transaksi: <b>${Number(token.totalTxns).toLocaleString()} txns</b>`;
+      }
+
+      caption += `
 • Harga: <b>$${parseFloat(token.priceUsd).toFixed(6)}</b>
 • Volume: <b>$${Number(token.volume24h).toLocaleString()}</b>
 • Pool: <code>${escapeHtml(token.poolName)}</code>
@@ -1003,12 +1057,14 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
       }
     }
 
+    const refreshKey = category === 'coingecko' ? 'cg' : (category === 'robinhood' ? 'rh' : (category === 'freshexp' ? 'fresh' : category));
+
     await ctx.replyWithHTML(
       '👇 <i>Pilih token di atas untuk deploy ke Base, atau ganti kategori:</i>',
       Markup.inlineKeyboard([
         [
           Markup.button.callback('📑 Pilih Kategori Lain', 'cmd_trending_menu'),
-          Markup.button.callback('🔄 Refresh', `cmd_trending_${category === 'coingecko' ? 'cg' : category}`)
+          Markup.button.callback('🔄 Refresh', `cmd_trending_${refreshKey}`)
         ],
         [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
       ])
@@ -1102,7 +1158,7 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
     const minutes = overrideMinutes || storage.getIntervalMinutes();
     const intervalMs = Math.max(minutes * 60 * 1000, 60000);
     const label = minutes >= 60 ? `${minutes / 60} Jam` : `${minutes} Menit`;
-    console.log(`[AutoDeploy Poller] Started. Checking multi-chain trending (Clanker.world, Base, Solana, Pump.fun, CoinGecko, FOMO) every ${label} (${intervalMs / 1000}s)...`);
+    console.log(`[AutoDeploy Poller] Started. Checking multi-chain trending (Clanker, Fresh High-Exposure, Robinhood, ARC, Base, Solana, Pump.fun, CoinGecko, FOMO) every ${label} (${intervalMs / 1000}s)...`);
 
     this.pollingInterval = setInterval(async () => {
       try {
