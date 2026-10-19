@@ -900,7 +900,7 @@ Ditemukan <b>${activeTokens.length} Token</b> dengan aktivitas likuiditas/volume
 Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideploy ke <b>Base via Clanker</b>:
 
 🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (Clanker, Koin Baru Fresh, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
-🔥 <b>2. Koin Baru Exposure Tinggi:</b> Token baru rilis (<72j) dengan volume &amp; transaksi masif dari jaringan manapun
+🔥 <b>2. Koin Baru Exposure Tinggi:</b> Token baru rilis (&lt;72j) dengan volume &amp; transaksi masif dari jaringan manapun
 🏹 <b>3. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
 ⚡ <b>4. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
 🤖 <b>5. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j &amp; transaksi on-chain di Clanker.world
@@ -916,7 +916,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
 
 👇 <i>Klik kategori pilihan Anda:</i>`;
 
-    await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
+    const keyboard = Markup.inlineKeyboard([
       [
         Markup.button.callback('🌐 🔥 Semua Trending (All-in-One)', 'cmd_trending_all')
       ],
@@ -951,7 +951,14 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         Markup.button.callback('🦄 Multi-DEX (Uni/Raydium)', 'cmd_trending_multidex'),
         Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')
       ]
-    ]));
+    ]);
+
+    try {
+      await ctx.replyWithHTML(msg, keyboard);
+    } catch (e) {
+      console.warn('sendTrendingMenu replyWithHTML fallback:', e.message);
+      await ctx.reply(msg.replace(/<[^>]+>/g, ''), keyboard);
+    }
   }
 
   async sendTrendingList(ctx, category = 'all') {
@@ -975,100 +982,126 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
       multidex: '🦄 Multi-DEX Trending (Uniswap/Raydium)'
     };
 
-    await ctx.reply(`🔍 Mengambil data token trending [${labels[category] || category}]...`);
+    try {
+      await ctx.reply(`🔍 Mengambil data token trending [${labels[category] || category}]...`);
 
-    let tokens = [];
-    if (category === 'robinhood' || category === 'rh') {
-      tokens = await trendingService.getRobinhoodTrending();
-    } else if (category === 'arc') {
-      tokens = await trendingService.getArcTrending();
-    } else if (category === 'fresh' || category === 'freshexp') {
-      tokens = await trendingService.getFreshHighExposureTrending();
-    } else if (category === 'clanker') {
-      tokens = await trendingService.getClankerWorldTrending();
-    } else if (category === 'dxall') {
-      tokens = await trendingService.getDexScreenerAllChainTrending();
-    } else if (category === 'base') {
-      tokens = await trendingService.getGeckoTerminalTrending('base');
-    } else if (category === 'pump') {
-      tokens = await trendingService.getPumpFunTrending();
-    } else if (category === 'coingecko') {
-      tokens = await trendingService.getCoinGeckoTrending();
-    } else if (category === 'fomo') {
-      tokens = await trendingService.getFomoBoostedTrending();
-    } else if (category === 'dxnew') {
-      tokens = await trendingService.getDexScreenerNewPairsBase();
-    } else if (category === 'solana') {
-      tokens = await trendingService.getGeckoTerminalTrending('solana');
-    } else if (category === 'eth') {
-      tokens = await trendingService.getEthBscTrending('eth');
-    } else if (category === 'bsc') {
-      tokens = await trendingService.getEthBscTrending('bsc');
-    } else if (category === 'multidex') {
-      tokens = await trendingService.getMultiPlatformDexTrending();
-    } else {
-      tokens = await trendingService.getAllTrendingTokens();
-    }
+      let tokens = [];
+      if (category === 'robinhood' || category === 'rh') {
+        tokens = await trendingService.getRobinhoodTrending();
+      } else if (category === 'arc') {
+        tokens = await trendingService.getArcTrending();
+      } else if (category === 'fresh' || category === 'freshexp') {
+        tokens = await trendingService.getFreshHighExposureTrending();
+      } else if (category === 'clanker') {
+        tokens = await trendingService.getClankerWorldTrending();
+      } else if (category === 'dxall') {
+        tokens = await trendingService.getDexScreenerAllChainTrending();
+      } else if (category === 'base') {
+        tokens = await trendingService.getGeckoTerminalTrending('base');
+      } else if (category === 'pump') {
+        tokens = await trendingService.getPumpFunTrending();
+      } else if (category === 'coingecko') {
+        tokens = await trendingService.getCoinGeckoTrending();
+      } else if (category === 'fomo') {
+        tokens = await trendingService.getFomoBoostedTrending();
+      } else if (category === 'dxnew') {
+        tokens = await trendingService.getDexScreenerNewPairsBase();
+      } else if (category === 'solana') {
+        tokens = await trendingService.getGeckoTerminalTrending('solana');
+      } else if (category === 'eth') {
+        tokens = await trendingService.getEthBscTrending('eth');
+      } else if (category === 'bsc') {
+        tokens = await trendingService.getEthBscTrending('bsc');
+      } else if (category === 'multidex') {
+        tokens = await trendingService.getMultiPlatformDexTrending();
+      } else {
+        tokens = await trendingService.getAllTrendingTokens();
+      }
 
-    if (!tokens || tokens.length === 0) {
-      return ctx.replyWithHTML(`⚠️ Tidak ada token trending yang ditemukan untuk kategori <b>${labels[category] || category}</b> saat ini.`);
-    }
+      if (!tokens || tokens.length === 0) {
+        return ctx.replyWithHTML(
+          `⚠️ Tidak ada token trending yang ditemukan untuk kategori <b>${labels[category] || category}</b> saat ini.`,
+          Markup.inlineKeyboard([
+            [Markup.button.callback('📑 Pilih Kategori Lain', 'cmd_trending_menu')],
+            [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
+          ])
+        );
+      }
 
-    this.trendingCache = tokens.slice(0, 6);
+      this.trendingCache = tokens.slice(0, 6);
 
-    await ctx.replyWithHTML(`🔥 <b>TOP TRENDING TOKENS [${labels[category] || category}]:</b>`);
+      await ctx.replyWithHTML(`🔥 <b>TOP TRENDING TOKENS [${labels[category] || category}]:</b>`);
 
-    for (const [index, token] of this.trendingCache.entries()) {
-      let caption = 
+      for (const [index, token] of this.trendingCache.entries()) {
+        let caption = 
 `#${index + 1} 🪙 <b>${escapeHtml(token.name)}</b> (<code>$${escapeHtml(token.symbol)}</code>)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Sumber: <b>${escapeHtml(token.sourceType)}</b>
 • Network Asal: <b>${escapeHtml(token.sourceNetwork)}</b>`;
 
-      if (token.age) {
-        caption += `\n• Umur Token: <b>${escapeHtml(token.age)}</b>`;
-      }
-      if (token.totalTxns) {
-        caption += `\n• Total Transaksi: <b>${Number(token.totalTxns).toLocaleString()} txns</b>`;
-      }
-
-      caption += `
-• Harga: <b>$${parseFloat(token.priceUsd).toFixed(6)}</b>
-• Volume: <b>$${Number(token.volume24h).toLocaleString()}</b>
-• Pool: <code>${escapeHtml(token.poolName)}</code>
-• Link Asal: <a href="${token.sourceUrl}">Info Pool / Token</a>`;
-
-      const buttons = [
-        [Markup.button.callback(`🚀 Deploy ke Base via Clanker`, `d_idx_${index}`)]
-      ];
-
-      try {
-        if (token.imageUrl && token.imageUrl.startsWith('http')) {
-          await ctx.replyWithPhoto(token.imageUrl, {
-            caption,
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard(buttons)
-          });
-        } else {
-          await ctx.replyWithHTML(caption, Markup.inlineKeyboard(buttons));
+        if (token.age) {
+          caption += `\n• Umur Token: <b>${escapeHtml(token.age)}</b>`;
         }
-      } catch (e) {
-        await ctx.replyWithHTML(caption, Markup.inlineKeyboard(buttons));
+        if (token.totalTxns) {
+          caption += `\n• Total Transaksi: <b>${Number(token.totalTxns).toLocaleString()} txns</b>`;
+        }
+
+        const priceNum = parseFloat(token.priceUsd) || 0;
+        const priceStr = priceNum < 0.000001 ? priceNum.toExponential(4) : priceNum.toFixed(6);
+        const volNum = parseFloat(token.volume24h) || 0;
+
+        caption += `
+• Harga: <b>$${priceStr}</b>
+• Volume: <b>$${volNum.toLocaleString()}</b>
+• Pool: <code>${escapeHtml(token.poolName)}</code>
+• Link Asal: <a href="${escapeHtml(token.sourceUrl)}">Info Pool / Token</a>`;
+
+        const buttons = [
+          [Markup.button.callback(`🚀 Deploy ke Base via Clanker`, `d_idx_${index}`)]
+        ];
+
+        try {
+          if (token.imageUrl && token.imageUrl.startsWith('http')) {
+            await ctx.replyWithPhoto(token.imageUrl, {
+              caption,
+              parse_mode: 'HTML',
+              ...Markup.inlineKeyboard(buttons)
+            });
+          } else {
+            await ctx.replyWithHTML(caption, Markup.inlineKeyboard(buttons));
+          }
+        } catch (e) {
+          try {
+            await ctx.replyWithHTML(caption, Markup.inlineKeyboard(buttons));
+          } catch (e2) {
+            const plain = `#${index + 1} 🪙 ${token.name} ($${token.symbol})\n• Sumber: ${token.sourceType}\n• Jaringan: ${token.sourceNetwork}\n• Harga: $${priceStr}\n• Volume: $${volNum.toLocaleString()}\n• Info: ${token.sourceUrl}`;
+            await ctx.reply(plain, Markup.inlineKeyboard(buttons));
+          }
+        }
       }
+
+      const refreshKey = category === 'coingecko' ? 'cg' : (category === 'robinhood' ? 'rh' : (category === 'freshexp' ? 'fresh' : category));
+
+      await ctx.replyWithHTML(
+        '👇 <i>Pilih token di atas untuk deploy ke Base, atau ganti kategori:</i>',
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📑 Pilih Kategori Lain', 'cmd_trending_menu'),
+            Markup.button.callback('🔄 Refresh', `cmd_trending_${refreshKey}`)
+          ],
+          [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
+        ])
+      );
+    } catch (err) {
+      console.error(`Error in sendTrendingList [${category}]:`, err.message);
+      await ctx.replyWithHTML(
+        `⚠️ <b>Gagal memuat kategori [${labels[category] || category}]:</b> ${escapeHtml(err.message)}\nSilakan coba lagi atau pilih kategori lain.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📑 Pilih Kategori Lain', 'cmd_trending_menu')],
+          [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
+        ])
+      );
     }
-
-    const refreshKey = category === 'coingecko' ? 'cg' : (category === 'robinhood' ? 'rh' : (category === 'freshexp' ? 'fresh' : category));
-
-    await ctx.replyWithHTML(
-      '👇 <i>Pilih token di atas untuk deploy ke Base, atau ganti kategori:</i>',
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📑 Pilih Kategori Lain', 'cmd_trending_menu'),
-          Markup.button.callback('🔄 Refresh', `cmd_trending_${refreshKey}`)
-        ],
-        [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
-      ])
-    );
   }
 
   async sendBatchDeploymentSummary(ctx, results) {

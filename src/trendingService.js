@@ -9,7 +9,7 @@ export class TrendingService {
     this.dexScreenerBase = 'https://api.dexscreener.com';
     this.clankerWorldBase = 'https://www.clanker.world/api';
     this.cache = new Map();
-    this.cacheExpiry = 60 * 1000; // 1 minute in-memory cache
+    this.cacheExpiry = 3 * 60 * 1000; // 3 minutes in-memory cache to stay well under rate limits
   }
 
   async getXAlphaTrending() {
@@ -28,7 +28,10 @@ export class TrendingService {
 
     const url = `${this.clankerWorldBase}/tokens?sortBy=volume-h24&sort=desc&page=1&limit=20`;
     const json = await this.safeFetchJson(url);
-    if (!json || !json.data) return [];
+    if (!json || !json.data) {
+      if (cached && cached.data && cached.data.length > 0) return cached.data;
+      return [];
+    }
 
     const results = [];
     const seen = new Set();
@@ -101,7 +104,10 @@ export class TrendingService {
 
     const url = `${this.geckoTerminalBase}/networks/${network}/trending_pools?include=base_token`;
     const json = await this.safeFetchJson(url, { 'Accept': 'application/json;version=20230302' });
-    if (!json || !json.data) return [];
+    if (!json || !json.data) {
+      if (cached && cached.data && cached.data.length > 0) return cached.data;
+      return [];
+    }
 
     const pools = json.data || [];
     const included = json.included || [];
