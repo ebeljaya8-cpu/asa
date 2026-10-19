@@ -508,7 +508,7 @@ Selamat datang di pusat kontrol bot token launchpad Base!
 • Token Dideploy: <b>${state.totalDeployedCount || 0} token</b>
 
 ⚙️ <b>SMART CONTRACT &amp; TOKENOMICS:</b>
-• Deskripsi: <b>Institutional Pro DeFi Metadata</b>
+• Deskripsi: <b>Profil Profesional &amp; Narasi Koin (Fokus Identitas Token)</b>
 • Fee: <b>3% Permanent</b> | Anti-Snipe: <b>120 Detik</b>
 • Creator Vault: <b>5%</b> | Pool: <b>Project (10 Range)</b>
 • Batch Duplikasi: <b>${suffixDisplay}</b>

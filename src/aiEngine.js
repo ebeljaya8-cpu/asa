@@ -182,7 +182,7 @@ export class AIEngine {
     if (symbol.length < 3) symbol = `${symbol}X`;
     if (symbol.length > 6) symbol = symbol.substring(0, 6);
 
-    const description = `${name} ($${symbol}) is an autonomous AI-curated decentralized asset on Base, derived from high-momentum Web3 alpha signals. Backed by Uniswap v4 permanent liquidity locks and dynamic MEV protection hooks.`;
+    const description = `${name} ($${symbol}) is an autonomous community-centric digital asset natively launched on Base, inspired by emerging Web3 alpha momentum and digital innovation. Conceived to unite decentralized supporters through verifiable on-chain participation, community stewardship, and collaborative ecosystem growth.`;
 
     return { name, symbol, description };
   }

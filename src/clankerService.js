@@ -117,10 +117,47 @@ export class ClankerService {
   }
 
   /**
-   * Generates professional description for the token metadata
+   * Generates professional, coin-focused description explaining the coin itself (narrative, utility, mission)
+   * Completely free of Clanker protocol metadata or mechanical fee parameters
    */
-  generateProDescription(name, symbol) {
-    return `${name} ($${symbol}) is an institutional-grade decentralized digital asset natively launched on Base Layer 2 via the Clanker Protocol. Powered by Uniswap v4 concentrated liquidity hooks, ${symbol} integrates permanent automated liquidity locking, a 120-second decaying anti-MEV protection structure, and a transparent 3% static protocol redistribution fee. Engineered for sustainable community governance, deep on-chain liquidity, and high-throughput cross-application composability across the Base ecosystem.`;
+  generateProDescription(name, symbol, baseDescription = '') {
+    // If a descriptive text from external source (like DexScreener/X) exists and is substantial
+    if (baseDescription && baseDescription.trim().length > 30 && !/uniswap v4|clanker protocol|anti-mev/i.test(baseDescription)) {
+      const cleanDesc = baseDescription.trim().replace(/\s+/g, ' ');
+      return `${cleanDesc} ${name} ($${symbol}) is an independently launched community asset on Base dedicated to transparent digital ownership and ecosystem growth.`;
+    }
+
+    const lower = `${name} ${symbol}`.toLowerCase();
+
+    // 1. AI, Tech & Autonomous Agents
+    if (/ai|agent|bot|neural|intel|gpt|compute|model|brain|synth|matrix|cyber/i.test(lower)) {
+      return `${name} ($${symbol}) is an innovative decentralized digital asset on Base, designed to empower open-source artificial intelligence coordination and autonomous Web3 technology. Built for developers, enthusiasts, and community builders, ${symbol} represents the intersection of decentralized intelligence, algorithmic transparency, and next-generation digital utility across the on-chain ecosystem.`;
+    }
+
+    // 2. DeFi, Yield & Financial Utilities
+    if (/fi|defi|yield|stake|vault|capital|fund|swap|liquidity|trade|finance|bank|reserve/i.test(lower)) {
+      return `${name} ($${symbol}) is a decentralized financial utility asset on Base, created to foster transparent on-chain economic participation and community-driven liquidity coordination. Embodying the ethos of open finance, ${symbol} provides a transparent medium of value exchange, empowering holders with decentralized ownership and collaborative ecosystem stewardship.`;
+    }
+
+    // 3. Meme, Cultural & Community Movements
+    if (/doge|cat|pepe|frog|woof|meow|inu|meme|chad|moon|ape|banana|pump|fun/i.test(lower)) {
+      return `${name} ($${symbol}) is a community-driven cultural asset on Base, celebrating the vibrant energy of decentralized internet culture and digital creativity. Built from grassroots community enthusiasm, ${symbol} unites global supporters around a shared creative narrative, emphasizing decentralized community governance, social coordination, and active collective participation.`;
+    }
+
+    // 4. Gaming & Digital Entertainment
+    if (/game|play|meta|quest|hero|pixel|arcade|arena|guild|craft/i.test(lower)) {
+      return `${name} ($${symbol}) is an interactive digital entertainment asset on Base, bridging Web3 gaming communities with open, decentralized digital value. Engineered to support player-centric ecosystems and creative virtual economies, ${symbol} serves as the native identity token connecting gaming enthusiasts across decentralized environments.`;
+    }
+
+    // 5. Universal Flagship Professional Identity (Distinctive variations based on symbol)
+    const templates = [
+      `${name} ($${symbol}) is an independently deployed decentralized digital asset natively living on the Base network. Conceived to drive meaningful community engagement and peer-to-peer digital collaboration, ${symbol} serves as an open utility and identity token uniting holders in a transparent, decentralized ecosystem.`,
+      `${name} ($${symbol}) is a modern decentralized asset on Base, built to explore new frontiers in community-driven digital culture and decentralized coordination. Championing fair access and transparent on-chain participation, ${symbol} empowers its community with a verifiable digital medium designed for long-term grassroots adoption.`,
+      `${name} ($${symbol}) is a next-generation decentralized ecosystem token on Base, established to support community-led initiatives, decentralized networking, and digital value exchange. Engineered for transparency, sustainability, and open community participation across the evolving Web3 landscape.`
+    ];
+
+    const charCodeSum = symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    return templates[charCodeSum % templates.length];
   }
 
   /**
@@ -128,7 +165,7 @@ export class ClankerService {
    */
   buildDeployPayload({ name, symbol, imageUrl, customDescription, options = {} }) {
     const adminAddress = this.account?.address || '0x000000000000000000000000000000000000dEaD';
-    const description = customDescription || this.generateProDescription(name, symbol);
+    const description = this.generateProDescription(name, symbol, customDescription);
     
     // Fee calculation: 3% = 300 bps (150 clankerFee + 150 pairedFee in hundredths of bps: 150 each)
     const feePct = options.feePercent !== undefined ? options.feePercent : config.permanentFeePercent;
@@ -308,7 +345,8 @@ export class ClankerService {
         name: targetName,
         symbol: targetSymbol,
         imageUrl: token.imageUrl,
-        originPool: token.poolAddress
+        originPool: token.poolAddress,
+        customDescription: token.description || ''
       });
 
       results.push({
