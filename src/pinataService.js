@@ -4,6 +4,7 @@ export class PinataService {
   constructor() {
     this.jwt = config.pinataJwt;
     this.apiUrl = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
+    this.blockedUntil = 0;
   }
 
   /**
@@ -13,8 +14,8 @@ export class PinataService {
    * @returns {Promise<string>} ipfs:// URI or original URL fallback
    */
   async uploadFromUrl(imageUrl, fileName = 'token_logo.png') {
-    if (!this.jwt) {
-      return imageUrl; // Fallback if no JWT configured
+    if (!this.jwt || Date.now() < this.blockedUntil) {
+      return imageUrl; // Fallback if no JWT configured or plan limit reached
     }
 
     try {
@@ -45,7 +46,12 @@ export class PinataService {
 
       if (!uploadRes.ok) {
         const errorText = await uploadRes.text();
-        console.warn(`[Pinata] Pinata upload error: ${errorText}`);
+        if (uploadRes.status === 403 || errorText.includes('plan usage limit') || errorText.includes('FORBIDDEN')) {
+          console.warn('[Pinata] Pinata plan usage limit reached. Bypassing Pinata for 1 hour to prevent deploy delays.');
+          this.blockedUntil = Date.now() + 3600 * 1000;
+        } else {
+          console.warn(`[Pinata] Pinata upload error: ${errorText}`);
+        }
         return imageUrl;
       }
 

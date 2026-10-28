@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http, formatEther, formatGwei, parseGwei } from 'viem';
+import { createPublicClient, createWalletClient, http, formatEther, formatGwei, parseGwei, keccak256, stringToHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { Clanker } from 'clanker-sdk/v4';
@@ -270,9 +270,14 @@ export class ClankerService {
 
     const devBuyEth = options.devBuyEth !== undefined ? options.devBuyEth : (wConfig.devBuyEth !== undefined ? wConfig.devBuyEth : config.devBuyEth);
 
+    // Compute unique salt to guarantee zero CREATE2 address collision on Base
+    const saltSeed = options.saltSeed || `${name}_${symbol}_${adminAddress}_${walletIndex}_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+    const salt = options.salt || keccak256(stringToHex(saltSeed));
+
     const payload = {
       name,
       symbol,
+      salt,
       image: imageUrl || 'https://assets.coingecko.com/coins/images/placeholder.png',
       tokenAdmin: adminAddress,
       metadata: {
@@ -337,6 +342,20 @@ export class ClankerService {
 
     const payload = this.buildDeployPayload({ name, symbol, imageUrl: finalImageUrl, customDescription, options, walletIndex: w.id });
 
+    // Validate expected address against Base blockchain to ensure no contract already exists
+    try {
+      const plan = await w.clanker.getDeployTransaction(payload);
+      let targetAddr = plan.expectedAddress;
+      const code = await this.publicClient.getCode({ address: targetAddr });
+      if (code && code !== '0x') {
+        console.warn(`[${w.name}] Address collision detected at ${targetAddr} for "${name}". Re-generating fresh salt...`);
+        const freshSalt = keccak256(stringToHex(`${name}_${symbol}_${w.account?.address || '0x'}_${Date.now()}_${Math.floor(Math.random() * 1000000)}`));
+        payload.salt = freshSalt;
+      }
+    } catch (e) {
+      // Continue gracefully
+    }
+
     // Dry Run or Wallet lacks private key: Calculate predicted address and simulate
     if (config.dryRun || !w.account || !w.walletClient) {
       try {
@@ -386,7 +405,9 @@ export class ClankerService {
       const deployResult = await w.clanker.deploy(payload);
 
       if (deployResult.error) {
-        throw new Error(deployResult.error.message || 'Deployment rejected by RPC/Contract');
+        const underlying = deployResult.error.error || deployResult.error.cause;
+        const detailMsg = underlying?.shortMessage || underlying?.details || underlying?.message || deployResult.error.data?.label || deployResult.error.message || 'Deployment rejected by RPC/Contract';
+        throw new Error(detailMsg);
       }
 
       const txHash = deployResult.txHash;
@@ -422,13 +443,15 @@ export class ClankerService {
         clankerUrl: `https://www.clanker.world/clanker/${tokenAddress}`
       };
     } catch (err) {
-      console.error(`[${w.name}] Deployment failed for ${name}:`, err.message);
+      const underlying = err.error || err.cause;
+      const detailMsg = underlying?.shortMessage || underlying?.details || underlying?.message || err.message || 'Unknown error';
+      console.error(`[${w.name}] Deployment failed for ${name}:`, detailMsg);
       return {
         success: false,
         walletIndex: w.id,
         walletName: w.name,
         walletAddress: w.account ? w.account.address : '',
-        error: err.message
+        error: detailMsg
       };
     }
   }

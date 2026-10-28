@@ -1142,7 +1142,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
 
 🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (OKX, Clanker, Koin Baru Fresh, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
 🔥 <b>2. OKX Hot Tokens:</b> Token paling hot di OKX Web3 (Trending by Token Score & X Social Hype + Top Gainers)
-⭐ <b>3. Koin Baru Exposure Tinggi:</b> Token baru rilis (<72j) dengan volume & transaksi masif dari jaringan manapun
+⭐ <b>3. Koin Baru Exposure Tinggi:</b> Token baru rilis (&lt; 72 jam) dengan volume &amp; transaksi masif dari jaringan manapun
 🏹 <b>4. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
 ⚡ <b>5. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
 🤖 <b>6. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j & transaksi on-chain di Clanker.world
