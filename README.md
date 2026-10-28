@@ -111,8 +111,11 @@ Kirim perintah berikut ke bot Telegram Anda:
 | :--- | :--- |
 | `/start` | Menampilkan dashboard utama, status bot, saldo ETH, dan tombol aksi cepat. |
 | `/trending` | Menampilkan daftar token trending teratas dari GeckoTerminal Base lengkap dengan foto, harga, volume, dan tombol `[ 🚀 Deploy via Clanker (2x) ]`. |
-| `/autodeploy on` | Mengaktifkan auto-deploy otomatis jika ada token trending baru yang terdeteksi di GeckoTerminal. |
+| `/autodeploy on` | Mengaktifkan auto-deploy otomatis jika ada token trending baru. |
 | `/autodeploy off` | Menonaktifkan auto-deploy otomatis (hanya mode manual). |
+| `/autodeploy primary` | Mengaktifkan auto-deploy HANYA untuk Wallet Utama (W1). |
+| `/autodeploy all` | Mengaktifkan auto-deploy untuk SEMUA 3 Wallet secara simultan. |
+| `/walletmode [all|primary]` | Beralih antara mode auto-deploy semua wallet atau hanya wallet utama. |
 | `/deploy <Nama> <Ticker> [URL_Gambar]` | Mendeploy token kustom secara manual (akan membuat versi reguler dan versi "BASE"). |
 | `/status` | Mengecek saldo ETH deployer, status RPC Base, dan jumlah token yang telah diluncurkan. |
 | `/history` | Menampilkan daftar token yang sudah dideploy beserta tautan langsung ke BaseScan, DexScreener, dan Clanker. |

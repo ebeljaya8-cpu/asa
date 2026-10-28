@@ -254,9 +254,25 @@ export class TelegramBotApp {
       await this.sendXRadarMenu(ctx);
     });
 
-    // /autodeploy [on|off]
+    // /autodeploy [on|off|all|primary]
     bot.command('autodeploy', async (ctx) => {
       const text = ctx.message.text.split(' ')[1]?.toLowerCase();
+      if (text === 'all') {
+        storage.toggleAutoDeploy(true);
+        storage.setAllWalletsAutoDeploy(true);
+        return ctx.replyWithHTML(
+          '⚡ <b>Auto-Deploy: 🟢 AKTIF (SEMUA 3 WALLET)</b>\nKetiga wallet akan mendeploy token berbeda secara simultan.',
+          Markup.inlineKeyboard([[Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]])
+        );
+      } else if (text === 'primary' || text === '1') {
+        storage.toggleAutoDeploy(true);
+        storage.setOnlyPrimaryWalletAutoDeploy();
+        return ctx.replyWithHTML(
+          '⚡ <b>Auto-Deploy: 🟢 AKTIF (HANYA WALLET UTAMA)</b>\nHanya Wallet 1 yang akan mendeploy token secara berkala. Wallet 2 & 3 dimatikan.',
+          Markup.inlineKeyboard([[Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]])
+        );
+      }
+
       let newState;
       if (text === 'on') {
         newState = storage.toggleAutoDeploy(true);
@@ -268,11 +284,36 @@ export class TelegramBotApp {
 
       const statusText = newState ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)';
       await ctx.replyWithHTML(
-        `⚡ <b>Status Auto-Deploy:</b> ${statusText}\n\n${newState ? 'Bot otomatis memantau GeckoTerminal dan mendeploy token trending baru (2x pengulangan dengan akhiran BASE)!' : 'Auto-deploy dinonaktifkan. Anda tetap dapat mendeploy manual lewat tombol /trending.'}`,
+        `⚡ <b>Status Auto-Deploy Global:</b> ${statusText}\n\n${newState ? 'Bot otomatis memantau Radar Hype & Tokenomics dan mendeploy token trending baru!' : 'Auto-deploy dinonaktifkan. Anda tetap dapat mendeploy manual lewat tombol /trending.'}`,
         Markup.inlineKeyboard([
           [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
         ])
       );
+    });
+
+    // /walletmode [all|primary]
+    bot.command('walletmode', async (ctx) => {
+      const mode = ctx.message.text.split(' ')[1]?.toLowerCase();
+      if (mode === 'all') {
+        storage.setAllWalletsAutoDeploy(true);
+        await ctx.replyWithHTML('👥 <b>Mode Auto-Deploy: SEMUA 3 WALLET DIAKTIFKAN.</b>');
+      } else if (mode === 'primary' || mode === '1') {
+        storage.setOnlyPrimaryWalletAutoDeploy();
+        await ctx.replyWithHTML('👤 <b>Mode Auto-Deploy: HANYA WALLET UTAMA DIAKTIFKAN.</b>');
+      } else {
+        const cur = storage.getAutoDeployWalletMode();
+        const curLabel = cur === 'primary_only' ? 'Hanya Wallet Utama' : (cur === 'all_wallets' ? 'Semua 3 Wallet' : 'Kustom');
+        await ctx.replyWithHTML(
+          `👛 <b>Mode Target Auto-Deploy Saat Ini:</b> ${curLabel}\n\nPilih mode di bawah:\n• <code>/walletmode all</code> - Aktifkan semua 3 wallet\n• <code>/walletmode primary</code> - Hanya wallet utama`,
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback('👥 Semua 3 Wallet', 'cmd_wallet_mode_all'),
+              Markup.button.callback('👤 Hanya Wallet Utama', 'cmd_wallet_mode_primary')
+            ],
+            [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
+          ])
+        );
+      }
     });
 
     // /deploy <name> <symbol> <imageUrl> -> Deploys across ALL wallets simultaneously
@@ -349,6 +390,42 @@ export class TelegramBotApp {
     bot.action('cmd_deploy_all_wallets', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.executeDeployAllWallets(ctx);
+    });
+
+    bot.action('cmd_wallet_mode_all', async (ctx) => {
+      await ctx.answerCbQuery('Semua 3 wallet diaktifkan untuk auto-deploy!').catch(() => {});
+      storage.setAllWalletsAutoDeploy(true);
+      await ctx.replyWithHTML(
+        `👥 <b>MODE TARGET AUTO-DEPLOY: SEMUA 3 WALLET AKTIF!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• <b>1️⃣ Wallet 1 (Utama):</b> 🟢 AKTIF\n` +
+        `• <b>2️⃣ Wallet 2:</b> 🟢 AKTIF\n` +
+        `• <b>3️⃣ Wallet 3:</b> 🟢 AKTIF\n\n` +
+        `✅ Saat jadwal auto-deploy tiba, bot akan mendeploy 3 token berbeda secara simultan menggunakan ketiga wallet.`,
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('👤 Ubah ke Hanya Wallet Utama', 'cmd_wallet_mode_primary'),
+            Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')
+          ]
+        ])
+      );
+    });
+
+    bot.action('cmd_wallet_mode_primary', async (ctx) => {
+      await ctx.answerCbQuery('Auto-deploy diubah: Hanya Wallet Utama!').catch(() => {});
+      storage.setOnlyPrimaryWalletAutoDeploy();
+      await ctx.replyWithHTML(
+        `👤 <b>MODE TARGET AUTO-DEPLOY: HANYA WALLET UTAMA!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• <b>1️⃣ Wallet 1 (Utama):</b> 🟢 AKTIF\n` +
+        `• <b>2️⃣ Wallet 2:</b> 🔴 NONAKTIF (Dimatikan)\n` +
+        `• <b>3️⃣ Wallet 3:</b> 🔴 NONAKTIF (Dimatikan)\n\n` +
+        `✅ Bot sekarang <b>HANYA</b> akan menggunakan <b>Wallet 1 (Utama)</b> untuk mendeploy token secara otomatis. Wallet 2 & 3 tidak akan dipakai saat auto-deploy.`,
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('👥 Ubah ke Semua 3 Wallet', 'cmd_wallet_mode_all'),
+            Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')
+          ]
+        ])
+      );
     });
 
     bot.action(/^cmd_wallet_view_(\d+)$/, async (ctx) => {
@@ -450,7 +527,12 @@ export class TelegramBotApp {
       await ctx.answerCbQuery();
       const newState = storage.toggleAutoDeploy();
       const statusText = newState ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)';
-      await ctx.replyWithHTML(`⚡ <b>Status Auto-Deploy berhasil diubah ke:</b> ${statusText}`);
+      await ctx.replyWithHTML(
+        `⚡ <b>Status Auto-Deploy Global berhasil diubah ke:</b> ${statusText}\n\n${newState ? '✅ Bot otomatis memantau Radar Hype & Tokenomics dan mendeploy ke 3 wallet secara berkala.' : '⏸️ Auto-deploy dinonaktifkan. Anda tetap dapat mendeploy manual lewat menu Deploy.'}`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
+        ])
+      );
     });
 
     bot.action('cmd_status', async (ctx) => {
@@ -624,6 +706,11 @@ export class TelegramBotApp {
       walletsOverview += `• <b>${tag}:</b> <code>${addrShort}</code> (<b>${w.balanceEth} ETH</b>) ${autoTag}\n`;
     }
 
+    const walletMode = storage.getAutoDeployWalletMode();
+    const walletModeLabel = walletMode === 'primary_only' 
+      ? '👤 Hanya Wallet Utama (W1)' 
+      : (walletMode === 'all_wallets' ? '👥 Semua 3 Wallet (Simultan)' : '⚙️ Kustom');
+
     const message = 
 `💎 <b>CLANKER x RADAR MULTI-WALLET (BASE NETWORK)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -631,6 +718,7 @@ Selamat datang di pusat kontrol bot token launchpad Base 3-Wallet!
 
 📊 <b>STATUS SISTEM:</b>
 • Auto-Deploy Global: <b>${autoStatus}</b>
+• Target Auto-Deploy: <b>${walletModeLabel}</b>
 • Frekuensi Cek: <b>Setiap ${intervalLabel}</b>
 • Mode Saldo: <b>Dev Buy Minimal (${config.devBuyEth} ETH) ✅</b>
 • Mode Gas: <b>${gasModeLabel}</b> (Gas Base: <code>${gasInfo.gasPriceGwei} Gwei</code>)
@@ -652,7 +740,11 @@ ${walletsOverview}
       ],
       [
         Markup.button.callback('🔥 Radar OKX & Multi-Chain', 'cmd_trending_menu'),
-        Markup.button.callback('⚡ Toggle Auto-Deploy', 'cmd_toggle_autodeploy')
+        Markup.button.callback(state.autoDeploy ? '⚡ Auto-Deploy: 🟢 AKTIF' : '⚡ Auto-Deploy: 🔴 NONAKTIF', 'cmd_toggle_autodeploy')
+      ],
+      [
+        Markup.button.callback(walletMode === 'all_wallets' ? '✅ 👥 Semua 3 Wallet' : '👥 Auto: Semua 3 Wallet', 'cmd_wallet_mode_all'),
+        Markup.button.callback(walletMode === 'primary_only' ? '✅ 👤 Hanya Wallet Utama' : '👤 Auto: Hanya Wallet 1', 'cmd_wallet_mode_primary')
       ],
       [
         Markup.button.callback('⏱️ Atur Durasi', 'cmd_interval_menu'),
@@ -691,6 +783,11 @@ ${walletsOverview}
       standard: '🔵 Normal'
     }[gasInfo.mode] || '🟢 Hemat Biaya';
 
+    const walletMode = storage.getAutoDeployWalletMode();
+    const walletModeLabel = walletMode === 'primary_only' 
+      ? '👤 Hanya Wallet Utama (W1)' 
+      : (walletMode === 'all_wallets' ? '👥 Semua 3 Wallet' : '⚙️ Kustom');
+
     let walletsDetailedStr = '';
     for (const w of wallets) {
       const isPrimary = w.id === 1;
@@ -704,6 +801,7 @@ ${walletsOverview}
 `📊 <b>STATUS BOT, 3 WALLET &amp; BIAYA GAS BASE</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Auto-Deploy Global: <b>${autoStatus}</b>
+• Target Auto-Deploy: <b>${walletModeLabel}</b>
 • Frekuensi Cek: <b>Setiap ${intervalLabel}</b>
 • Suffix Nama: <b>${suffixDisplay}</b>
 • Mode Gas: <b>${gasModeLabel}</b>
@@ -718,13 +816,17 @@ ${walletsDetailedStr}
 
     await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
       [Markup.button.callback('👛 Kelola 3 Wallet Terpisah', 'cmd_wallets_menu')],
+      [
+        Markup.button.callback(walletMode === 'all_wallets' ? '✅ 👥 Semua 3 Wallet' : '👥 Semua 3 Wallet', 'cmd_wallet_mode_all'),
+        Markup.button.callback(walletMode === 'primary_only' ? '✅ 👤 Hanya Wallet Utama' : '👤 Hanya Wallet Utama', 'cmd_wallet_mode_primary')
+      ],
       [Markup.button.callback('🔄 Refresh Status & Gas', 'cmd_status')],
       [
         Markup.button.callback('⛽ Atur Mode Gas', 'cmd_gas_menu'),
         Markup.button.callback('⏱️ Atur Durasi', 'cmd_interval_menu')
       ],
       [
-        Markup.button.callback('⚡ Ubah Auto-Deploy', 'cmd_toggle_autodeploy'),
+        Markup.button.callback(state.autoDeploy ? '⚡ Auto-Deploy: 🟢 AKTIF' : '⚡ Auto-Deploy: 🔴 NONAKTIF', 'cmd_toggle_autodeploy'),
         Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')
       ]
     ]));
@@ -1495,7 +1597,12 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
 
   async sendWalletsMenu(ctx) {
     const wallets = await clankerService.getAllWalletsInfo();
+    const walletMode = storage.getAutoDeployWalletMode();
+    const modeLabel = walletMode === 'primary_only' ? '👤 Hanya Wallet Utama (W1)' : (walletMode === 'all_wallets' ? '👥 Semua 3 Wallet (Simultan)' : '⚙️ Kustom');
+
     let msg = `👛 <b>PUSAT KONTROL &amp; PENGATURAN 3 WALLET TERPISAH</b>\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🎯 <b>Target Auto-Deploy Saat Ini:</b> <b>${modeLabel}</b>\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `Kelola dan atur masing-masing dari 3 wallet secara mandiri. Setiap wallet mendeploy token berbeda secara simultan di Base!\n\n`;
 
@@ -1513,7 +1620,7 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
     }
 
     msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `👇 <i>Pilih wallet di bawah untuk membuka pengaturan detail:</i>`;
+    msg += `👇 <i>Pilih menu di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
@@ -1523,6 +1630,10 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
       [
         Markup.button.callback('3️⃣ Atur Wallet 3', 'cmd_wallet_view_3'),
         Markup.button.callback('🚀 Deploy 3 Wallet Sekaligus', 'cmd_deploy_all_wallets')
+      ],
+      [
+        Markup.button.callback(walletMode === 'all_wallets' ? '✅ 👥 Semua 3 Wallet' : '👥 Aktifkan Semua 3 Wallet', 'cmd_wallet_mode_all'),
+        Markup.button.callback(walletMode === 'primary_only' ? '✅ 👤 Hanya Wallet Utama' : '👤 Hanya Wallet Utama', 'cmd_wallet_mode_primary')
       ],
       [
         Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')

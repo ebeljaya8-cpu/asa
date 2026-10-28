@@ -210,6 +210,29 @@ export class Storage {
     return next;
   }
 
+  setAllWalletsAutoDeploy(enabled = true) {
+    for (let i = 1; i <= 3; i++) {
+      this.setWalletConfig(i, { enabled });
+    }
+    return true;
+  }
+
+  setOnlyPrimaryWalletAutoDeploy() {
+    this.setWalletConfig(1, { enabled: true });
+    this.setWalletConfig(2, { enabled: false });
+    this.setWalletConfig(3, { enabled: false });
+    return true;
+  }
+
+  getAutoDeployWalletMode() {
+    const w1 = this.getWalletConfig(1).enabled !== false;
+    const w2 = this.getWalletConfig(2).enabled !== false;
+    const w3 = this.getWalletConfig(3).enabled !== false;
+    if (w1 && !w2 && !w3) return 'primary_only';
+    if (w1 && w2 && w3) return 'all_wallets';
+    return 'custom';
+  }
+
   saveState(state) {
     try {
       fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2));
