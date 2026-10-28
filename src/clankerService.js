@@ -14,35 +14,92 @@ export class ClankerService {
       transport: http(config.rpcUrl)
     });
 
+    this.wallets = new Map();
     this.account = null;
     this.walletClient = null;
     this.clanker = null;
 
-    this.initWallet();
+    this.initAllWallets();
   }
 
-  initWallet() {
-    if (config.privateKey && config.privateKey.startsWith('0x') && config.privateKey.length === 66) {
-      try {
-        this.account = privateKeyToAccount(config.privateKey);
-        this.walletClient = createWalletClient({
-          account: this.account,
-          chain: base,
-          transport: http(config.rpcUrl)
-        });
-        this.clanker = new Clanker({
-          wallet: this.walletClient,
+  initAllWallets() {
+    this.wallets.clear();
+    const walletDefs = [
+      { id: 1, name: 'Wallet 1 (Utama)' },
+      { id: 2, name: 'Wallet 2' },
+      { id: 3, name: 'Wallet 3' }
+    ];
+
+    for (const def of walletDefs) {
+      const privateKey = storage.getWalletPrivateKey(def.id);
+      let account = null;
+      let walletClient = null;
+      let clankerInstance = null;
+
+      if (privateKey && privateKey.startsWith('0x') && privateKey.length === 66) {
+        try {
+          account = privateKeyToAccount(privateKey);
+          walletClient = createWalletClient({
+            account,
+            chain: base,
+            transport: http(config.rpcUrl)
+          });
+          clankerInstance = new Clanker({
+            wallet: walletClient,
+            publicClient: this.publicClient
+          });
+        } catch (err) {
+          console.error(`Failed to initialize ${def.name}:`, err.message);
+        }
+      }
+
+      // If no valid client, provide a publicClient-only instance for dryRun/simulation
+      if (!clankerInstance) {
+        clankerInstance = new Clanker({
           publicClient: this.publicClient
         });
-      } catch (err) {
-        console.error('Failed to initialize wallet client:', err.message);
       }
-    } else {
-      // Initialize with public client only (read/simulate mode)
-      this.clanker = new Clanker({
-        publicClient: this.publicClient
+
+      this.wallets.set(def.id, {
+        id: def.id,
+        name: def.name,
+        account,
+        walletClient,
+        clanker: clankerInstance,
+        hasKey: Boolean(account)
       });
     }
+
+    // Set backward compatibility aliases pointing to Wallet 1 (Utama)
+    const primary = this.wallets.get(1);
+    this.account = primary?.account || null;
+    this.walletClient = primary?.walletClient || null;
+    this.clanker = primary?.clanker || null;
+  }
+
+  reloadWallets() {
+    this.initAllWallets();
+  }
+
+  getWallet(walletIndex = 1) {
+    const idx = Number(walletIndex) || 1;
+    return this.wallets.get(idx) || this.wallets.get(1);
+  }
+
+  getActiveWallets() {
+    const active = [];
+    for (let i = 1; i <= 3; i++) {
+      const w = this.wallets.get(i);
+      const wConfig = storage.getWalletConfig(i);
+      if (w && w.hasKey && wConfig.enabled !== false) {
+        active.push(w);
+      }
+    }
+    // If no wallets have keys configured, return Wallet 1 for simulation/dryRun
+    if (active.length === 0) {
+      active.push(this.wallets.get(1));
+    }
+    return active;
   }
 
   /**
@@ -84,36 +141,64 @@ export class ClankerService {
   }
 
   /**
-   * Get wallet address and balance
+   * Get wallet address and balance for a specific wallet
    */
-  async getWalletInfo() {
-    if (!this.account) {
+  async getWalletInfo(walletIndex = 1) {
+    const idx = Number(walletIndex) || 1;
+    const w = this.wallets.get(idx) || this.wallets.get(1);
+    const wConfig = storage.getWalletConfig(idx);
+
+    if (!w || !w.account) {
       return {
+        id: idx,
+        name: w?.name || `Wallet ${idx}`,
         hasWallet: false,
-        address: 'No Private Key Configured',
+        address: 'Private Key Belum Dikonfigurasi',
         balanceEth: '0.0000',
-        network: 'Base (Chain ID 8453)'
+        network: 'Base (Chain ID 8453)',
+        enabled: wConfig.enabled !== false,
+        settings: wConfig
       };
     }
 
     try {
       const balanceWei = await this.publicClient.getBalance({
-        address: this.account.address
+        address: w.account.address
       });
       return {
+        id: w.id,
+        name: w.name,
         hasWallet: true,
-        address: this.account.address,
+        address: w.account.address,
         balanceEth: parseFloat(formatEther(balanceWei)).toFixed(5),
-        network: 'Base (Chain ID 8453)'
+        network: 'Base (Chain ID 8453)',
+        enabled: wConfig.enabled !== false,
+        settings: wConfig
       };
     } catch (err) {
       return {
+        id: w.id,
+        name: w.name,
         hasWallet: true,
-        address: this.account.address,
+        address: w.account.address,
         balanceEth: 'Error fetching',
-        network: 'Base (Chain ID 8453)'
+        network: 'Base (Chain ID 8453)',
+        enabled: wConfig.enabled !== false,
+        settings: wConfig
       };
     }
+  }
+
+  /**
+   * Get status & balances for all 3 wallets
+   */
+  async getAllWalletsInfo() {
+    const results = [];
+    for (let i = 1; i <= 3; i++) {
+      const info = await this.getWalletInfo(i);
+      results.push(info);
+    }
+    return results;
   }
 
   /**
@@ -163,20 +248,27 @@ export class ClankerService {
   /**
    * Prepare deploy payload complying with Clanker v4 Zod schema
    */
-  buildDeployPayload({ name, symbol, imageUrl, customDescription, options = {} }) {
-    const adminAddress = this.account?.address || '0x000000000000000000000000000000000000dEaD';
+  /**
+   * Prepare deploy payload complying with Clanker v4 Zod schema for a specific wallet
+   */
+  buildDeployPayload({ name, symbol, imageUrl, customDescription, options = {}, walletIndex = 1 }) {
+    const w = this.getWallet(walletIndex);
+    const wConfig = storage.getWalletConfig(w.id);
+    const adminAddress = w.account?.address || '0x000000000000000000000000000000000000dEaD';
     const description = this.generateProDescription(name, symbol, customDescription);
     
-    // Fee calculation: 3% = 300 bps (150 clankerFee + 150 pairedFee in hundredths of bps: 150 each)
-    const feePct = options.feePercent !== undefined ? options.feePercent : config.permanentFeePercent;
+    // Fee calculation: e.g. 3% = 300 bps (150 clankerFee + 150 pairedFee in hundredths of bps: 150 each)
+    const feePct = options.feePercent !== undefined ? options.feePercent : (wConfig.feePercent !== undefined ? wConfig.feePercent : config.permanentFeePercent);
     const halfBps = Math.round((feePct * 100) / 2);
 
     // Sniper tax decay: max 120s
     const sniperDecay = options.sniperTaxDurationSec || config.sniperTaxDurationSec;
 
     // Creator vault: minimum 7 days lockup duration enforced by Clanker contract
-    const vaultPct = options.creatorVaultPercent !== undefined ? options.creatorVaultPercent : config.creatorVaultPercent;
+    const vaultPct = options.creatorVaultPercent !== undefined ? options.creatorVaultPercent : (wConfig.vaultPercent !== undefined ? wConfig.vaultPercent : config.creatorVaultPercent);
     const lockupSeconds = Math.max((config.creatorVaultLockupDays || 7) * 86400, 7 * 86400);
+
+    const devBuyEth = options.devBuyEth !== undefined ? options.devBuyEth : (wConfig.devBuyEth !== undefined ? wConfig.devBuyEth : config.devBuyEth);
 
     const payload = {
       name,
@@ -208,7 +300,7 @@ export class ClankerService {
         recipient: adminAddress
       },
       devBuy: {
-        ethAmount: options.devBuyEth !== undefined ? options.devBuyEth : config.devBuyEth
+        ethAmount: devBuyEth
       }
     };
 
@@ -230,9 +322,10 @@ export class ClankerService {
   }
 
   /**
-   * Deploy token either on-chain or simulated (dry-run)
+   * Deploy token for a specific wallet (Wallet 1 Utama, Wallet 2, or Wallet 3)
    */
-  async deployToken({ name, symbol, imageUrl, customDescription, originPool = '', options = {} }) {
+  async deployTokenForWallet({ walletIndex = 1, name, symbol, imageUrl, customDescription, originPool = '', options = {} }) {
+    const w = this.getWallet(walletIndex);
     let finalImageUrl = imageUrl;
     if (imageUrl && !imageUrl.startsWith('ipfs://')) {
       try {
@@ -242,12 +335,12 @@ export class ClankerService {
       }
     }
 
-    const payload = this.buildDeployPayload({ name, symbol, imageUrl: finalImageUrl, customDescription, options });
+    const payload = this.buildDeployPayload({ name, symbol, imageUrl: finalImageUrl, customDescription, options, walletIndex: w.id });
 
-    // Dry Run or No Wallet: Calculate predicted address and simulate
-    if (config.dryRun || !this.account || !this.walletClient) {
+    // Dry Run or Wallet lacks private key: Calculate predicted address and simulate
+    if (config.dryRun || !w.account || !w.walletClient) {
       try {
-        const txPlan = await this.clanker.getDeployTransaction(payload);
+        const txPlan = await w.clanker.getDeployTransaction(payload);
         const predictedAddress = txPlan.expectedAddress;
         const simulatedTxHash = '0x_simulated_' + Math.random().toString(16).substring(2, 10);
 
@@ -258,13 +351,19 @@ export class ClankerService {
           tokenAddress: predictedAddress,
           txHash: simulatedTxHash,
           originPool,
-          sourceNetwork: config.geckoNetwork
+          sourceNetwork: config.geckoNetwork,
+          walletIndex: w.id,
+          walletName: w.name,
+          walletAddress: w.account ? w.account.address : 'Simulasi (Tanpa Key)'
         };
         storage.saveDeployedToken(record);
 
         return {
           success: true,
           simulated: true,
+          walletIndex: w.id,
+          walletName: w.name,
+          walletAddress: w.account ? w.account.address : 'Simulasi (Tanpa Key)',
           tokenAddress: predictedAddress,
           txHash: simulatedTxHash,
           basescanUrl: `https://basescan.org/token/${predictedAddress}`,
@@ -274,6 +373,8 @@ export class ClankerService {
       } catch (err) {
         return {
           success: false,
+          walletIndex: w.id,
+          walletName: w.name,
           error: `Simulation failed: ${err.message}`
         };
       }
@@ -281,15 +382,15 @@ export class ClankerService {
 
     // Live deployment on Base
     try {
-      console.log(`[Deploying to Clanker] ${name} (${symbol})...`);
-      const deployResult = await this.clanker.deploy(payload);
+      console.log(`[${w.name}] Deploying to Clanker: "${name}" (${symbol}) using ${w.account.address}...`);
+      const deployResult = await w.clanker.deploy(payload);
 
       if (deployResult.error) {
         throw new Error(deployResult.error.message || 'Deployment rejected by RPC/Contract');
       }
 
       const txHash = deployResult.txHash;
-      console.log(`Transaction sent! TxHash: ${txHash}. Awaiting confirmation...`);
+      console.log(`[${w.name}] Transaction sent! TxHash: ${txHash}. Awaiting confirmation...`);
 
       const receipt = await deployResult.waitForTransaction();
       const tokenAddress = receipt.address;
@@ -301,13 +402,19 @@ export class ClankerService {
         tokenAddress,
         txHash,
         originPool,
-        sourceNetwork: config.geckoNetwork
+        sourceNetwork: config.geckoNetwork,
+        walletIndex: w.id,
+        walletName: w.name,
+        walletAddress: w.account.address
       };
       storage.saveDeployedToken(record);
 
       return {
         success: true,
         simulated: false,
+        walletIndex: w.id,
+        walletName: w.name,
+        walletAddress: w.account.address,
         tokenAddress,
         txHash,
         basescanUrl: `https://basescan.org/token/${tokenAddress}`,
@@ -315,20 +422,77 @@ export class ClankerService {
         clankerUrl: `https://www.clanker.world/clanker/${tokenAddress}`
       };
     } catch (err) {
-      console.error(`Deployment failed for ${name}:`, err);
+      console.error(`[${w.name}] Deployment failed for ${name}:`, err.message);
       return {
         success: false,
+        walletIndex: w.id,
+        walletName: w.name,
+        walletAddress: w.account ? w.account.address : '',
         error: err.message
       };
     }
   }
 
   /**
-   * Execute batch deployment for trending token:
-   * 1st deploy: Original name ($NAME)
-   * 2nd deploy: With "BASE" suffix ($NAME BASE)
+   * Deploy token (legacy signature, defaults to Wallet 1)
    */
-  async deployTrendingBatch(token) {
+  async deployToken(params) {
+    return this.deployTokenForWallet({
+      walletIndex: params.walletIndex || 1,
+      ...params
+    });
+  }
+
+  /**
+   * Deploy distinct tokens simultaneously across active wallets (Wallet 1, 2, 3)
+   * Each wallet deploys a DIFFERENT token candidate concurrently!
+   */
+  async deployMultiWalletSimultaneous(distinctCandidates = []) {
+    const activeWallets = this.getActiveWallets();
+    console.log(`[MultiWallet Deploy] Deploying across ${activeWallets.length} active wallets simultaneously...`);
+
+    const deployTasks = activeWallets.map(async (wallet, idx) => {
+      const candidate = distinctCandidates[idx];
+      if (!candidate) {
+        return {
+          walletIndex: wallet.id,
+          walletName: wallet.name,
+          walletAddress: wallet.account?.address || '',
+          success: false,
+          error: 'Tidak ada kandidat token berbeda yang dialokasikan untuk wallet ini'
+        };
+      }
+
+      console.log(`[MultiWallet] Assigning "${candidate.name}" ($${candidate.symbol}) to ${wallet.name}`);
+      const res = await this.deployTokenForWallet({
+        walletIndex: wallet.id,
+        name: candidate.name,
+        symbol: candidate.symbol,
+        imageUrl: candidate.imageUrl,
+        originPool: candidate.poolAddress || '',
+        customDescription: candidate.description || '',
+        options: {}
+      });
+
+      return {
+        walletIndex: wallet.id,
+        walletName: wallet.name,
+        walletAddress: wallet.account?.address || '',
+        targetName: candidate.name,
+        targetSymbol: candidate.symbol,
+        candidate,
+        ...res
+      };
+    });
+
+    const results = await Promise.all(deployTasks);
+    return results;
+  }
+
+  /**
+   * Execute batch deployment for trending token (legacy single wallet batch)
+   */
+  async deployTrendingBatch(token, walletIndex = 1) {
     const results = [];
     const suffix = storage.getRepeatSuffix();
     const shouldRepeat = Boolean(suffix && suffix.toUpperCase() !== 'NONE');
@@ -339,9 +503,10 @@ export class ClankerService {
       const targetName = isRepeatWithSuffix ? `${token.name} ${suffix}` : token.name;
       const targetSymbol = token.symbol;
 
-      console.log(`Starting deploy batch item ${i + 1}/${repeatCount}: "${targetName}" (${targetSymbol})`);
+      console.log(`Starting deploy batch item ${i + 1}/${repeatCount}: "${targetName}" (${targetSymbol}) via Wallet ${walletIndex}`);
 
-      const result = await this.deployToken({
+      const result = await this.deployTokenForWallet({
+        walletIndex,
         name: targetName,
         symbol: targetSymbol,
         imageUrl: token.imageUrl,
@@ -356,7 +521,6 @@ export class ClankerService {
         ...result
       });
 
-      // Small delay between transactions if multiple
       if (i < repeatCount - 1) {
         await new Promise(r => setTimeout(r, 4000));
       }

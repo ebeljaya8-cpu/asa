@@ -102,6 +102,9 @@ export class Storage {
       txHash: tokenRecord.txHash,
       originPool: tokenRecord.originPool,
       sourceNetwork: tokenRecord.sourceNetwork || 'base',
+      walletIndex: tokenRecord.walletIndex || 1,
+      walletName: tokenRecord.walletName || 'Wallet 1 (Utama)',
+      walletAddress: tokenRecord.walletAddress || '',
       deployedAt: new Date().toISOString(),
       basescanUrl: `https://basescan.org/token/${tokenRecord.tokenAddress}`,
       dexscreenerUrl: `https://dexscreener.com/base/${tokenRecord.tokenAddress}`,
@@ -116,13 +119,95 @@ export class Storage {
     this.saveState(state);
   }
 
+  getDeployedTokensByWallet(walletIndex) {
+    const tokens = this.getDeployedTokens();
+    return tokens.filter(t => (t.walletIndex || 1) === Number(walletIndex));
+  }
+
   getState() {
     try {
       const data = fs.readFileSync(this.stateFile, 'utf-8');
-      return JSON.parse(data);
+      const state = JSON.parse(data) || {};
+      
+      // Ensure 3 wallets state structure is initialized
+      if (!state.wallets) {
+        state.wallets = {
+          1: { id: 1, name: 'Wallet 1 (Utama)', enabled: true, devBuyEth: config.devBuyEth, feePercent: config.permanentFeePercent, vaultPercent: config.creatorVaultPercent },
+          2: { id: 2, name: 'Wallet 2', enabled: true, devBuyEth: config.devBuyEth, feePercent: config.permanentFeePercent, vaultPercent: config.creatorVaultPercent },
+          3: { id: 3, name: 'Wallet 3', enabled: true, devBuyEth: config.devBuyEth, feePercent: config.permanentFeePercent, vaultPercent: config.creatorVaultPercent }
+        };
+      }
+      return state;
     } catch {
-      return { autoDeploy: config.autoDeploy };
+      return {
+        autoDeploy: config.autoDeploy,
+        wallets: {
+          1: { id: 1, name: 'Wallet 1 (Utama)', enabled: true, devBuyEth: config.devBuyEth, feePercent: config.permanentFeePercent, vaultPercent: config.creatorVaultPercent },
+          2: { id: 2, name: 'Wallet 2', enabled: true, devBuyEth: config.devBuyEth, feePercent: config.permanentFeePercent, vaultPercent: config.creatorVaultPercent },
+          3: { id: 3, name: 'Wallet 3', enabled: true, devBuyEth: config.devBuyEth, feePercent: config.permanentFeePercent, vaultPercent: config.creatorVaultPercent }
+        }
+      };
     }
+  }
+
+  getWalletConfig(walletIndex = 1) {
+    const idx = Number(walletIndex) || 1;
+    const state = this.getState();
+    if (!state.wallets) state.wallets = {};
+    if (!state.wallets[idx]) {
+      state.wallets[idx] = {
+        id: idx,
+        name: idx === 1 ? 'Wallet 1 (Utama)' : `Wallet ${idx}`,
+        enabled: true,
+        devBuyEth: config.devBuyEth,
+        feePercent: config.permanentFeePercent,
+        vaultPercent: config.creatorVaultPercent
+      };
+      this.saveState(state);
+    }
+    return state.wallets[idx];
+  }
+
+  setWalletConfig(walletIndex, updates = {}) {
+    const idx = Number(walletIndex) || 1;
+    const state = this.getState();
+    if (!state.wallets) state.wallets = {};
+    state.wallets[idx] = {
+      ...this.getWalletConfig(idx),
+      ...updates
+    };
+    this.saveState(state);
+    return state.wallets[idx];
+  }
+
+  getWalletPrivateKey(walletIndex = 1) {
+    const idx = Number(walletIndex) || 1;
+    const state = this.getState();
+    const stored = state.wallets?.[idx]?.privateKey;
+    if (stored && stored.startsWith('0x') && stored.length === 66) {
+      return stored;
+    }
+    if (idx === 1) {
+      return config.privateKey || process.env.PRIVATE_KEY_1 || process.env.PRIVATE_KEY || '';
+    } else if (idx === 2) {
+      return config.privateKey2 || process.env.PRIVATE_KEY_2 || '';
+    } else if (idx === 3) {
+      return config.privateKey3 || process.env.PRIVATE_KEY_3 || '';
+    }
+    return '';
+  }
+
+  setWalletPrivateKey(walletIndex, privateKey) {
+    const idx = Number(walletIndex) || 1;
+    const cleanKey = (privateKey || '').trim();
+    return this.setWalletConfig(idx, { privateKey: cleanKey });
+  }
+
+  toggleWalletAutoDeploy(walletIndex, forceState) {
+    const current = this.getWalletConfig(walletIndex);
+    const next = typeof forceState === 'boolean' ? forceState : !current.enabled;
+    this.setWalletConfig(walletIndex, { enabled: next });
+    return next;
   }
 
   saveState(state) {

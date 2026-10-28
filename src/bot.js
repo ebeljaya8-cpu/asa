@@ -75,27 +75,66 @@ export class TelegramBotApp {
     // /help command
     bot.command('help', async (ctx) => {
       const helpMsg = 
-`📖 <b>PANDUAN LENGKAP PERINTAH BOT:</b>
-• <code>/start</code> - Membuka dashboard utama & menu interaktif
-• <code>/trending</code> - Daftar token trending lintas platform (+ Tombol Deploy)
-  <i>Pilihan langsung: <code>/trending fresh</code>, <code>/trending robinhood</code>, <code>/trending arc</code>, <code>/trending base</code>, <code>/trending all</code></i>
-• <code>/autodeploy on</code> - Aktifkan auto-deploy otomatis jika ada trending baru
-• <code>/autodeploy off</code> - Matikan auto-deploy otomatis
+`📖 <b>PANDUAN LENGKAP PERINTAH BOT (3 WALLET & RADAR HYPE):</b>
+• <code>/start</code> - Membuka dashboard utama & ringkasan 3 wallet
+• <code>/wallets</code> - Pusat pengaturan & kontrol 3 wallet terpisah
+• <code>/setkey2 &lt;0x...&gt;</code> - Pasang/ganti private key Wallet 2 (aman & auto-delete)
+• <code>/setkey3 &lt;0x...&gt;</code> - Pasang/ganti private key Wallet 3 (aman & auto-delete)
+• <code>/setkey1 &lt;0x...&gt;</code> - Pasang/ganti private key Wallet 1 (Utama)
+• <code>/deployall</code> - Deploy 3 token berbeda secara simultan di 3 wallet
+• <code>/trending</code> - Radar token trending terlengkap (+ tombol deploy)
+  <i>Pilihan langsung: <code>/trending okx</code>, <code>/trending fresh</code>, <code>/trending clanker</code>, <code>/trending base</code>, <code>/trending all</code></i>
+• <code>/autodeploy on</code> - Aktifkan auto-deploy simultan 3 wallet
+• <code>/autodeploy off</code> - Matikan auto-deploy
 • <code>/interval [15|30|60|120]</code> - Atur frekuensi auto-deploy (15m, 30m, 1j, 2j)
-• <code>/active</code> - Cek token yang sudah selesai vesting 1 hari & memiliki LP > $1
-• <code>/deploy &lt;Nama&gt; &lt;Ticker&gt; [ImageUrl]</code> - Deploy token manual via Clanker
-• <code>/status</code> - Cek saldo ETH wallet & status bot
+• <code>/active</code> - Cek token yang sudah selesai lockup & memiliki LP > $1
+• <code>/deploy &lt;Nama&gt; &lt;Ticker&gt; [ImageUrl]</code> - Deploy manual via Wallet 1
+• <code>/deploy1</code>, <code>/deploy2</code>, <code>/deploy3</code> - Deploy manual via wallet tertentu
+• <code>/status</code> - Cek saldo ETH 3 wallet & estimasi gas Base
 • <code>/history</code> - Riwayat token yang berhasil dideploy
-• <code>/settings</code> - Detail parameter deploy (fee, anti-snipe, vault, airdrop)
+• <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-<b>Fitur Khusus:</b>
-1. <b>Mode Hemat Saldo:</b> Dev Buy minimal (<code>${config.devBuyEth} ETH</code>) & gas teroptimasi.
-2. <b>Realtime Vesting Alert:</b> Notifikasi otomatis setelah token melewati lockup 1 hari jika likuiditas LP &gt; $1 dan ada pembeli.
-3. <b>Batch Duplikasi:</b> Deploy 2 versi per token (versi reguler dan versi akhiran <code>BASE</code>).`;
+<b>Fitur Unggulan Baru:</b>
+1. <b>Multi-Wallet Simultan:</b> Menjalankan 3 wallet secara bersamaan di Base Network, masing-masing mendeploy token berbeda tanpa duplikasi!
+2. <b>Radar Hype Terlengkap:</b> Memantau OKX Web3 Hot Tokens & Social Hype, Clanker.world, DexScreener, GeckoTerminal, dan Pump.fun!
+3. <b>Kontrol Terpisah Telegram:</b> Atur saldo, private key, dan auto-deploy masing-masing wallet secara mandiri lewat dashboard!`;
 
       await ctx.replyWithHTML(helpMsg, Markup.inlineKeyboard([
+        [Markup.button.callback('👛 Kelola 3 Wallet', 'cmd_wallets_menu')],
         [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
       ]));
+    });
+
+    // /wallets command (Pusat pengaturan 3 wallet)
+    bot.command(['wallets', 'wallet'], async (ctx) => {
+      await this.sendWalletsMenu(ctx);
+    });
+
+    // /deployall command (Deploy 3 token berbeda secara bersamaan ke 3 wallet)
+    bot.command('deployall', async (ctx) => {
+      await this.executeDeployAllWallets(ctx);
+    });
+
+    // /setkey1, /setkey2, /setkey3 commands (Set private key via chat with instant auto-delete)
+    bot.command(['setkey1', 'setwallet1'], async (ctx) => {
+      await this.handleSetKeyCommand(ctx, 1);
+    });
+    bot.command(['setkey2', 'setwallet2'], async (ctx) => {
+      await this.handleSetKeyCommand(ctx, 2);
+    });
+    bot.command(['setkey3', 'setwallet3'], async (ctx) => {
+      await this.handleSetKeyCommand(ctx, 3);
+    });
+
+    // /deploy1, /deploy2, /deploy3 commands (Manual deploy for a specific wallet)
+    bot.command('deploy1', async (ctx) => {
+      await this.handleManualDeployWallet(ctx, 1);
+    });
+    bot.command('deploy2', async (ctx) => {
+      await this.handleManualDeployWallet(ctx, 2);
+    });
+    bot.command('deploy3', async (ctx) => {
+      await this.handleManualDeployWallet(ctx, 3);
     });
 
     // /status command
@@ -118,6 +157,9 @@ export class TelegramBotApp {
       const parts = ctx.message.text.split(' ');
       const arg = parts[1]?.toLowerCase();
       if (arg) {
+        if (['okx', 'okxhot'].includes(arg)) {
+          return this.sendTrendingList(ctx, 'okx');
+        }
         if (['rh', 'robinhood'].includes(arg)) {
           return this.sendTrendingList(ctx, 'robinhood');
         }
@@ -267,6 +309,46 @@ export class TelegramBotApp {
     bot.action('cmd_trending_all', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendTrendingList(ctx, 'all');
+    });
+
+    bot.action(['cmd_trending_okx', 'cmd_trending_okxhot'], async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTrendingList(ctx, 'okx');
+    });
+
+    bot.action('cmd_wallets_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendWalletsMenu(ctx);
+    });
+
+    bot.action('cmd_deploy_all_wallets', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.executeDeployAllWallets(ctx);
+    });
+
+    bot.action(/^cmd_wallet_view_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      await this.sendWalletDetail(ctx, idx);
+    });
+
+    bot.action(/^cmd_wallet_toggle_(\d+)$/, async (ctx) => {
+      const idx = parseInt(ctx.match[1], 10);
+      const next = storage.toggleWalletAutoDeploy(idx);
+      await ctx.answerCbQuery(`Auto-Deploy Wallet ${idx}: ${next ? 'Aktif' : 'Nonaktif'}`).catch(() => {});
+      await this.sendWalletDetail(ctx, idx);
+    });
+
+    bot.action(/^cmd_wallet_setkey_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      await this.sendWalletSetKeyPrompt(ctx, idx);
+    });
+
+    bot.action(/^cmd_wallet_hist_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      await this.sendWalletHistoryMessage(ctx, idx);
     });
 
     bot.action(['cmd_trending_fresh', 'cmd_trending_freshexp'], async (ctx) => {
@@ -479,7 +561,7 @@ export class TelegramBotApp {
 
   async sendStartMenu(ctx) {
     const state = storage.getState();
-    const wallet = await clankerService.getWalletInfo();
+    const wallets = await clankerService.getAllWalletsInfo();
     const gasInfo = await clankerService.getGasInfo();
     const autoStatus = state.autoDeploy ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)';
     const intervalMins = storage.getIntervalMinutes();
@@ -493,36 +575,43 @@ export class TelegramBotApp {
       standard: '🔵 Normal'
     }[gasInfo.mode] || '🟢 Hemat Biaya';
 
+    let walletsOverview = '';
+    for (const w of wallets) {
+      const isPrimary = w.id === 1;
+      const tag = isPrimary ? '1️⃣ W1 (Utama)' : (w.id === 2 ? '2️⃣ W2' : '3️⃣ W3');
+      const addrShort = w.hasWallet ? `${w.address.slice(0, 6)}...${w.address.slice(-4)}` : '⚠️ Belum Dipasang';
+      const autoTag = w.enabled ? '🟢 ON' : '🔴 OFF';
+      walletsOverview += `• <b>${tag}:</b> <code>${addrShort}</code> (<b>${w.balanceEth} ETH</b>) ${autoTag}\n`;
+    }
+
     const message = 
-`💎 <b>CLANKER x GECKOTERMINAL AUTO-DEPLOY (BASE)</b>
+`💎 <b>CLANKER x RADAR MULTI-WALLET (BASE NETWORK)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Selamat datang di pusat kontrol bot token launchpad Base!
+Selamat datang di pusat kontrol bot token launchpad Base 3-Wallet!
 
 📊 <b>STATUS SISTEM:</b>
-• Auto-Deploy: <b>${autoStatus}</b>
+• Auto-Deploy Global: <b>${autoStatus}</b>
 • Frekuensi Cek: <b>Setiap ${intervalLabel}</b>
 • Mode Saldo: <b>Dev Buy Minimal (${config.devBuyEth} ETH) ✅</b>
 • Mode Gas: <b>${gasModeLabel}</b> (Gas Base: <code>${gasInfo.gasPriceGwei} Gwei</code>)
-• Wallet: <code>${wallet.address}</code>
-• Saldo ETH: <b>${wallet.balanceEth} ETH</b>
 • Token Dideploy: <b>${state.totalDeployedCount || 0} token</b>
 
-⚙️ <b>SMART CONTRACT &amp; TOKENOMICS:</b>
-• Deskripsi: <b>Profil Profesional &amp; Narasi Koin (Fokus Identitas Token)</b>
+👛 <b>STATUS 3 WALLET (DEPLOI SIMULTAN):</b>
+${walletsOverview}
+⚙️ <b>RADAR HYPE &amp; TOKENOMICS:</b>
+• Radar: <b>OKX Hot Tokens, Clanker, DexScreener, GeckoTerminal, Pump.fun</b>
 • Fee: <b>3% Permanent</b> | Anti-Snipe: <b>120 Detik</b>
-• Creator Vault: <b>5%</b> | Pool: <b>Project (10 Range)</b>
-• Batch Duplikasi: <b>${suffixDisplay}</b>
-• Airdrop: <b>Merkle Tree 1-Hari Terpasang</b>
+• Creator Vault: <b>5%</b> | Batch Duplikasi: <b>${suffixDisplay}</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <i>Pilih menu di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('🔥 Trending Multi-Chain', 'cmd_trending_menu'),
-        Markup.button.callback('🐦 X / Twitter Radar', 'cmd_x_radar')
+        Markup.button.callback('👛 Kelola 3 Wallet Terpisah', 'cmd_wallets_menu'),
+        Markup.button.callback('🚀 Deploy 3 Wallet Sekaligus', 'cmd_deploy_all_wallets')
       ],
       [
-        Markup.button.callback('🧠 AI Market Brain', 'cmd_ai_menu'),
+        Markup.button.callback('🔥 Radar OKX & Multi-Chain', 'cmd_trending_menu'),
         Markup.button.callback('⚡ Toggle Auto-Deploy', 'cmd_toggle_autodeploy')
       ],
       [
@@ -548,7 +637,7 @@ Selamat datang di pusat kontrol bot token launchpad Base!
 
   async sendStatusMessage(ctx) {
     const state = storage.getState();
-    const wallet = await clankerService.getWalletInfo();
+    const wallets = await clankerService.getAllWalletsInfo();
     const gasInfo = await clankerService.getGasInfo();
     const autoStatus = state.autoDeploy ? '🟢 AKTIF' : '🔴 NONAKTIF';
     const intervalMins = storage.getIntervalMinutes();
@@ -562,23 +651,33 @@ Selamat datang di pusat kontrol bot token launchpad Base!
       standard: '🔵 Normal'
     }[gasInfo.mode] || '🟢 Hemat Biaya';
 
+    let walletsDetailedStr = '';
+    for (const w of wallets) {
+      const isPrimary = w.id === 1;
+      const statusText = w.hasWallet 
+        ? `<code>${w.address}</code>\n  Saldo: <b>${w.balanceEth} ETH</b> | Auto-Deploy: <b>${w.enabled ? '🟢 ON' : '🔴 OFF'}</b>` 
+        : '<i>⚠️ Belum Dipasang (Gunakan /setkey' + w.id + ')</i>';
+      walletsDetailedStr += `• <b>${w.name} ${isPrimary ? '(Utama)' : ''}:</b>\n  ${statusText}\n`;
+    }
+
     const msg = 
-`📊 <b>STATUS BOT, WALLET &amp; BIAYA GAS BASE</b>
+`📊 <b>STATUS BOT, 3 WALLET &amp; BIAYA GAS BASE</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Auto-Deploy: <b>${autoStatus}</b>
+• Auto-Deploy Global: <b>${autoStatus}</b>
 • Frekuensi Cek: <b>Setiap ${intervalLabel}</b>
 • Suffix Nama: <b>${suffixDisplay}</b>
 • Mode Gas: <b>${gasModeLabel}</b>
 • Gas Base Saat Ini: <code>${gasInfo.gasPriceGwei} Gwei</code> (${gasInfo.recommendation})
-• Mode: <b>${config.dryRun ? '🧪 Dry Run (Simulasi)' : '⚡ Live Mainnet (Base)'}</b>
-• Dev Buy: <code>${config.devBuyEth} ETH</code> (Biaya Terendah)
-• Deployer: <code>${wallet.address}</code>
-• Saldo ETH: <b>${wallet.balanceEth} ETH</b>
-• Total Dideploy: <b>${state.totalDeployedCount || 0} token</b>
-• Pinata IPFS: <b>Aktif &amp; Terhubung ✅</b>
+• Mode Eksekusi: <b>${config.dryRun ? '🧪 Dry Run (Simulasi)' : '⚡ Live Mainnet (Base)'}</b>
+• Dev Buy Minimal: <code>${config.devBuyEth} ETH</code>
+• Total Token Dideploy: <b>${state.totalDeployedCount || 0} token</b>
+
+👛 <b>DETAIL SALDO &amp; STATUS 3 WALLET:</b>
+${walletsDetailedStr}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
     await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
+      [Markup.button.callback('👛 Kelola 3 Wallet Terpisah', 'cmd_wallets_menu')],
       [Markup.button.callback('🔄 Refresh Status & Gas', 'cmd_status')],
       [
         Markup.button.callback('⛽ Atur Mode Gas', 'cmd_gas_menu'),
@@ -899,26 +998,28 @@ Ditemukan <b>${activeTokens.length} Token</b> dengan aktivitas likuiditas/volume
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideploy ke <b>Base via Clanker</b>:
 
-🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (Clanker, Koin Baru Fresh, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
-🔥 <b>2. Koin Baru Exposure Tinggi:</b> Token baru rilis (&lt;72j) dengan volume &amp; transaksi masif dari jaringan manapun
-🏹 <b>3. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
-⚡ <b>4. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
-🤖 <b>5. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j &amp; transaksi on-chain di Clanker.world
-🦅 <b>6. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
-🔵 <b>7. Base Network:</b> GeckoTerminal Base trending pools
-💊 <b>8. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
-🦎 <b>9. CoinGecko Global:</b> Trending search &amp; coins global (Robinhood/Top Gainers)
-🚀 <b>10. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
-🆕 <b>11. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
-💎 <b>12. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
-🟡 <b>13. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
-🦄 <b>14. Multi-DEX (Uniswap/Raydium):</b> Top DEX trending multi-platform
+🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (OKX, Clanker, Koin Baru Fresh, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
+🔥 <b>2. OKX Hot Tokens:</b> Token paling hot di OKX Web3 (Trending by Token Score & X Social Hype + Top Gainers)
+⭐ <b>3. Koin Baru Exposure Tinggi:</b> Token baru rilis (<72j) dengan volume & transaksi masif dari jaringan manapun
+🏹 <b>4. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
+⚡ <b>5. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
+🤖 <b>6. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j & transaksi on-chain di Clanker.world
+🦅 <b>7. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
+🔵 <b>8. Base Network:</b> GeckoTerminal Base trending pools
+💊 <b>9. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
+🦎 <b>10. CoinGecko Global:</b> Trending search & coins global (Robinhood/Top Gainers)
+🚀 <b>11. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
+🆕 <b>12. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
+💎 <b>13. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
+🟡 <b>14. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
+🦄 <b>15. Multi-DEX (Uniswap/Raydium):</b> Top DEX trending multi-platform
 
 👇 <i>Klik kategori pilihan Anda:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('🌐 🔥 Semua Trending (All-in-One)', 'cmd_trending_all')
+        Markup.button.callback('🌐 🔥 Semua Trending (All-in-One)', 'cmd_trending_all'),
+        Markup.button.callback('🔥 OKX Hot Tokens', 'cmd_trending_okx')
       ],
       [
         Markup.button.callback('🔥 Koin Baru Exposure Tinggi', 'cmd_trending_fresh')
@@ -964,6 +1065,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
   async sendTrendingList(ctx, category = 'all') {
     const labels = {
       all: '🌐 Semua Multi-Chain & Platform',
+      okx: '🔥 OKX Hot Tokens (Web3 & Social Hype)',
+      okxhot: '🔥 OKX Hot Tokens (Web3 & Social Hype)',
       fresh: '🔥 Koin Baru Exposure Tinggi (All-Chain Fresh & High Volume)',
       freshexp: '🔥 Koin Baru Exposure Tinggi (All-Chain Fresh & High Volume)',
       robinhood: '🏹 GeckoTerminal & DexScreener (Robinhood L2)',
@@ -986,7 +1089,9 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
       await ctx.reply(`🔍 Mengambil data token trending [${labels[category] || category}]...`);
 
       let tokens = [];
-      if (category === 'robinhood' || category === 'rh') {
+      if (category === 'okx' || category === 'okxhot') {
+        tokens = await trendingService.getOkxHotTokens();
+      } else if (category === 'robinhood' || category === 'rh') {
         tokens = await trendingService.getRobinhoodTrending();
       } else if (category === 'arc') {
         tokens = await trendingService.getArcTrending();
@@ -1201,197 +1306,368 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
 
         this.isProcessingCandidate = true;
 
-        // 1. Cek saldo wallet sebelum eksekusi
-        const wallet = await clankerService.getWalletInfo();
-        if (!config.dryRun && wallet.hasWallet) {
-          const balanceNum = parseFloat(wallet.balanceEth) || 0;
-          if (balanceNum < 0.00005) {
+        // 1. Dapatkan daftar wallet yang aktif & terkonfigurasi
+        const activeWallets = clankerService.getActiveWallets();
+        if (!activeWallets || activeWallets.length === 0) {
+          console.warn('[AutoDeploy Poller] Tidak ada wallet yang aktif.');
+          return;
+        }
+
+        // 2. Cek saldo masing-masing wallet yang siap deploy
+        const readyWallets = [];
+        for (const w of activeWallets) {
+          const wInfo = await clankerService.getWalletInfo(w.id);
+          const bal = parseFloat(wInfo.balanceEth) || 0;
+          if (!config.dryRun && w.hasKey && bal < 0.00005) {
             await this.sendDetailedErrorReport({
-              action: `Pemeriksaan Saldo Pra-Deploy (${label})`,
-              errorMessage: `Saldo ETH Base tidak mencukupi: ${wallet.balanceEth} ETH (Dibutuhkan minimal ~0.0001 ETH untuk dev buy + gas)`,
-              recommendation: `Kirim sedikit ETH ke alamat deployer: ${wallet.address}`,
-              nextAction: 'Siklus deploy ditunda sementara sampai saldo mencukupi.'
+              action: `Pemeriksaan Saldo ${w.name}`,
+              errorMessage: `Saldo ETH Base tidak mencukupi: ${wInfo.balanceEth} ETH (Dibutuhkan minimal ~0.0001 ETH untuk dev buy + gas)`,
+              recommendation: `Kirim sedikit ETH ke alamat: ${wInfo.address}`,
+              nextAction: 'Wallet ini dilewati sementara untuk siklus ini.'
             });
-            return;
+          } else {
+            readyWallets.push(w);
           }
         }
 
-        // 2. Ambil seluruh kandidat token trending dari semua platform
-        let allCandidates = [];
-        try {
-          allCandidates = await trendingService.getAllTrendingTokens();
-        } catch (fetchErr) {
-          await this.sendDetailedErrorReport({
-            action: 'Pengambilan Data Trending Lintas Platform',
-            errorMessage: fetchErr.message,
-            nextAction: 'Mencoba mengambil token cadangan langsung dari Clanker.world...'
-          });
-          allCandidates = await trendingService.getClankerWorldTrending().catch(() => []);
+        if (readyWallets.length === 0) {
+          console.warn('[AutoDeploy Poller] Semua wallet memiliki saldo di bawah batas aman.');
+          return;
         }
 
-        if (!allCandidates || allCandidates.length === 0) {
+        // 3. Ambil kandidat token hype BERBEDA sejumlah wallet yang siap deploy
+        // Radar mencakup OKX Hot Tokens, Clanker, DexScreener, GeckoTerminal, Pump.fun
+        let distinctCandidates = [];
+        try {
+          distinctCandidates = await trendingService.getDistinctNewCandidates(readyWallets.length);
+        } catch (fetchErr) {
+          console.error('[AutoDeploy Poller] Error getting distinct candidates:', fetchErr);
+        }
+
+        if (!distinctCandidates || distinctCandidates.length === 0) {
           await this.sendDetailedErrorReport({
-            action: 'Scanning Trending Multi-Chain',
-            errorMessage: 'Tidak ada data trending yang ditemukan dari Clanker.world, GeckoTerminal, atau DexScreener.',
-            recommendation: 'Periksa koneksi internet server atau endpoint API sumber data.',
+            action: 'Scanning Radar Multi-Chain & OKX Hot Tokens',
+            errorMessage: 'Tidak ada kandidat token baru yang ditemukan dari seluruh platform.',
             nextAction: 'Bot akan mencoba kembali pada jadwal pemeriksaan berikutnya.'
           });
           return;
         }
 
-        // 3. Loop kandidat: jika token sudah pernah dideploy dengan nama/symbol yang sama,
-        // otomatis langsung cari kandidat lain potensial sampai berhasil deploy minimal 1 token!
-        let deployedSuccessfully = false;
-        let attemptIndex = 0;
-        const maxAttempts = 15;
-        const skippedDuplicates = [];
-
-        for (const candidate of allCandidates) {
-          if (deployedSuccessfully || attemptIndex >= maxAttempts) break;
-
-          // Cek apakah token dengan nama atau ticker ini sudah pernah dideploy
-          if (storage.isTokenAlreadyDeployed(candidate.symbol, candidate.name)) {
-            skippedDuplicates.push(`${candidate.name} ($${candidate.symbol})`);
-            console.log(`[AutoDeploy] Token "${candidate.name}" ($${candidate.symbol}) sudah pernah di-deploy. Otomatis mencari kandidat potensial berikutnya...`);
-            continue; // Langsung lewati dan cari kandidat berikutnya!
-          }
-
-          attemptIndex++;
-          console.log(`[AutoDeploy] Mencoba deploy kandidat #${attemptIndex}: "${candidate.name}" ($${candidate.symbol}) dari ${candidate.sourceType}...`);
-
-          // Beritahu Telegram kandidat yang sedang diproses
-          if (config.telegramChatId && this.bot) {
-            let notice = `⚡ <b>AUTODEPLOY SIKLUS RUTIN (MINIMAL 1 JAM = 1 TOKEN)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-            if (skippedDuplicates.length > 0) {
-              notice += `ℹ️ <i>Melewati ${skippedDuplicates.length} token yang sudah pernah di-deploy (${skippedDuplicates.slice(0, 3).join(', ')}${skippedDuplicates.length > 3 ? '...' : ''}). Mencari kandidat baru potensial:</i>\n\n`;
+        // 4. Notifikasi Telegram tentang rencana deploy simultan 3 wallet
+        if (config.telegramChatId && this.bot) {
+          let notice = `⚡ <b>AUTODEPLOY SIMULTAN (${readyWallets.length} WALLET BERBEDA)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+          notice += `Radar hype mendeteksi token potensial berbeda untuk masing-masing wallet:\n\n`;
+          for (let i = 0; i < readyWallets.length; i++) {
+            const w = readyWallets[i];
+            const cand = distinctCandidates[i];
+            if (cand) {
+              notice += `👛 <b>${w.name}:</b> <b>${escapeHtml(cand.name)}</b> (<code>$${escapeHtml(cand.symbol)}</code>)\n`;
+              notice += `  • Sumber: <b>${escapeHtml(cand.sourceType)}</b> (${cand.sourceNetwork}) | Vol: $${Number(cand.volume24h).toLocaleString()}\n`;
             }
-            notice += `🎯 <b>Kandidat Terpilih:</b> <b>${escapeHtml(candidate.name)}</b> (<code>$${escapeHtml(candidate.symbol)}</code>)\n`;
-            notice += `• Sumber: <b>${escapeHtml(candidate.sourceType)}</b> (${candidate.sourceNetwork})\n`;
-            notice += `• Volume 24j: <b>$${Number(candidate.volume24h).toLocaleString()}</b>\n\n`;
-            notice += `⏳ <i>Mengeksekusi deploy ke Base Layer 2 via Clanker v4...</i>`;
-            await this.bot.telegram.sendMessage(config.telegramChatId, notice, { parse_mode: 'HTML' }).catch(() => {});
           }
-
-          // Eksekusi deploy token
-          const results = await clankerService.deployTrendingBatch(candidate);
-          const hasSuccess = results && results.some(r => r.success);
-
-          if (hasSuccess) {
-            deployedSuccessfully = true;
-            storage.incrementAutoDeployCount();
-
-            // Kirim notifikasi sukses lengkap ke Telegram
-            if (config.telegramChatId && this.bot) {
-              let summary = `🎉 <b>AUTO-DEPLOY BERHASIL! (Target 1 Token/Jam Terpenuhi)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-              if (skippedDuplicates.length > 0) {
-                summary += `ℹ️ <i>Melewati ${skippedDuplicates.length} token yang sudah pernah ada agar tidak terjadi duplikasi.</i>\n\n`;
-              }
-              for (const res of results) {
-                if (res.success) {
-                  summary += `✅ <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\n`;
-                  summary += `• Contract: <code>${res.tokenAddress}</code>\n`;
-                  summary += `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
-                } else {
-                  summary += `⚠️ <i>Batch variasi gagal: ${escapeHtml(res.error || 'Unknown')}</i>\n\n`;
-                }
-              }
-              await this.bot.telegram.sendMessage(config.telegramChatId, summary, {
-                parse_mode: 'HTML',
-                disable_web_page_preview: true
-              }).catch(() => {});
-            }
-            break; // Selesai! Target 1 token tercapai.
-          } else {
-            // Deploy kandidat ini gagal! Kirim penjelasan detail ke Telegram lalu lanjut cari kandidat berikutnya
-            const firstError = results[0]?.error || 'Penyedia RPC / Smart contract Clanker menolak transaksi';
-            await this.sendDetailedErrorReport({
-              action: `Deploy Kandidat #${attemptIndex}`,
-              targetName: candidate.name,
-              targetSymbol: candidate.symbol,
-              errorMessage: firstError,
-              nextAction: 'Otomatis langsung mencari dan mengeksekusi kandidat potensial berikutnya agar target 1 token per jam tetap tercapai.'
-            });
-            console.log(`[AutoDeploy] Deploy gagal untuk "${candidate.name}": ${firstError}. Lanjut ke kandidat berikutnya...`);
-          }
+          notice += `\n⏳ <i>Mengeksekusi deploy bersamaan ke Base Layer 2 via Clanker v4...</i>`;
+          await this.bot.telegram.sendMessage(config.telegramChatId, notice, { parse_mode: 'HTML' }).catch(() => {});
         }
 
-        // 4. JIKA SEMUA KANDIDAT SUDAH PERNAH DIDEPLOY ATAU GAGAL:
-        // Bot TIDAK boleh menyerah, karena setiap minimal 1 jam bot WAJIB deploy 1 token!
-        // Buat kandidat berbasis AI Alpha unik agar target deploy 1 jam pasti tercapai!
-        if (!deployedSuccessfully) {
-          console.log('[AutoDeploy] Semua kandidat trending umum sudah pernah dideploy / gagal. Menghasilkan kandidat AI Alpha unik baru agar target wajib 1 jam tetap terpenuhi...');
-          
-          const memory = aiEngine.getMemory();
-          const keywords = (memory.successfulPatterns?.topKeywords || ['BASE', 'ALPHA', 'CLANKER', 'AI']).filter(k => k.length > 2);
-          const randomKw1 = keywords[Math.floor(Math.random() * keywords.length)] || 'BASE';
-          const randomKw2 = keywords[Math.floor(Math.random() * keywords.length)] || 'ALPHA';
-          const uniqueSuffix = Date.now().toString().slice(-4);
-          
-          const aiCandidate = {
-            name: `${randomKw1} ${randomKw2}`,
-            symbol: `${randomKw1.slice(0, 3)}${randomKw2.slice(0, 2)}${uniqueSuffix.slice(-1)}`.toUpperCase(),
-            imageUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/295953fa-15ed-4d3c-241d-b6c1758c6200/original',
-            volume24h: '10000',
-            sourceType: 'AI Autonomous Alpha (Anti-Skip Guard)',
-            sourceNetwork: 'BASE',
-            poolAddress: `ai_generated_${Date.now()}`
-          };
+        // 5. Eksekusi simultan deploy token berbeda di tiap wallet
+        const results = await clankerService.deployMultiWalletSimultaneous(distinctCandidates);
+        const hasSuccess = results && results.some(r => r.success);
+
+        if (hasSuccess) {
+          storage.incrementAutoDeployCount();
 
           if (config.telegramChatId && this.bot) {
-            await this.bot.telegram.sendMessage(
-              config.telegramChatId,
-              `🤖 <b>MEMENUHI TARGET WAJIB (1 JAM = 1 TOKEN)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `ℹ️ <i>Semua token trending reguler saat ini sudah pernah dideploy sebelumnya (${skippedDuplicates.length} token dilewati).\n` +
-              `Sesuai aturan wajib deploy tiap jam, AI membentuk token Alpha potensial baru:</i>\n\n` +
-              `🪙 <b>${escapeHtml(aiCandidate.name)}</b> (<code>$${escapeHtml(aiCandidate.symbol)}</code>)\n` +
-              `⏳ <i>Mengeksekusi deploy ke Base...</i>`,
-              { parse_mode: 'HTML' }
-            ).catch(() => {});
-          }
-
-          const fallbackResults = await clankerService.deployTrendingBatch(aiCandidate);
-          if (fallbackResults && fallbackResults.some(r => r.success)) {
-            deployedSuccessfully = true;
-            storage.incrementAutoDeployCount();
-
-            if (config.telegramChatId && this.bot) {
-              let summary = `🎉 <b>AUTO-DEPLOY BERHASIL (Target 1 Jam Tercapai!)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-              for (const res of fallbackResults) {
-                if (res.success) {
-                  summary += `✅ <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\n` +
-                             `• Contract: <code>${res.tokenAddress}</code>\n` +
-                             `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
-                }
+            let summary = `🎉 <b>AUTO-DEPLOY SIMULTAN BERHASIL!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            for (const res of results) {
+              if (res.success) {
+                summary += `✅ <b>${res.walletName}:</b> <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\n`;
+                summary += `• Deployer: <code>${res.walletAddress}</code>\n`;
+                summary += `• Contract: <code>${res.tokenAddress}</code>\n`;
+                summary += `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
+              } else {
+                summary += `⚠️ <b>${res.walletName}:</b> Gagal - <i>${escapeHtml(res.error || 'Unknown error')}</i>\n\n`;
               }
-              await this.bot.telegram.sendMessage(config.telegramChatId, summary, {
-                parse_mode: 'HTML',
-                disable_web_page_preview: true
-              }).catch(() => {});
             }
-          } else {
-            const fbError = fallbackResults[0]?.error || 'Simulasi atau transaksi ditolak';
-            await this.sendDetailedErrorReport({
-              action: 'Deploy AI Autonomous Fallback',
-              targetName: aiCandidate.name,
-              targetSymbol: aiCandidate.symbol,
-              errorMessage: fbError,
-              recommendation: 'Periksa saldo ETH atau stabilitas RPC Base.',
-              nextAction: 'Bot akan mengulang kembali pada jam berikutnya.'
-            });
+            await this.bot.telegram.sendMessage(config.telegramChatId, summary, {
+              parse_mode: 'HTML',
+              disable_web_page_preview: true
+            }).catch(() => {});
           }
+        } else {
+          const firstErr = results[0]?.error || 'Simulasi atau transaksi ditolak';
+          await this.sendDetailedErrorReport({
+            action: 'Auto-Deploy Simultan Multi-Wallet',
+            errorMessage: firstErr,
+            nextAction: 'Bot akan mengulang kembali pada siklus auto-deploy berikutnya.'
+          });
         }
       } catch (err) {
         console.error('[AutoDeploy Poller Error]:', err);
         await this.sendDetailedErrorReport({
           action: 'Siklus Auto-Deploy Rutin',
           errorMessage: err.message || String(err),
-          recommendation: 'Sistem mengalami error tak terduga. Bot akan mencoba me-recover pada siklus selanjutnya.',
+          recommendation: 'Sistem mengalami kendala tak terduga. Bot akan mencoba me-recover pada siklus selanjutnya.',
           nextAction: 'Melakukan log error dan mereset status poller.'
         });
       } finally {
         this.isProcessingCandidate = false;
       }
     }, intervalMs);
+  }
+
+  // ==========================================
+  // MULTI-WALLET MANAGEMENT HELPERS & VIEWS
+  // ==========================================
+
+  async sendWalletsMenu(ctx) {
+    const wallets = await clankerService.getAllWalletsInfo();
+    let msg = `👛 <b>PUSAT KONTROL &amp; PENGATURAN 3 WALLET TERPISAH</b>\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `Kelola dan atur masing-masing dari 3 wallet secara mandiri. Setiap wallet mendeploy token berbeda secara simultan di Base!\n\n`;
+
+    for (const w of wallets) {
+      const isPrimary = w.id === 1;
+      const statusKey = w.hasWallet ? '✅ Terpasang' : '⚠️ Belum Dipasang';
+      const autoTag = w.enabled ? '🟢 AKTIF' : '🔴 NONAKTIF';
+      const deployed = storage.getDeployedTokensByWallet(w.id).length;
+
+      msg += `👛 <b>${escapeHtml(w.name)} ${isPrimary ? '(Utama)' : ''}:</b>\n`;
+      msg += `• Kunci: <b>${statusKey}</b>\n`;
+      msg += `• Alamat: <code>${w.address}</code>\n`;
+      msg += `• Saldo ETH: <b>${w.balanceEth} ETH</b>\n`;
+      msg += `• Auto-Deploy: <b>${autoTag}</b> | Total Deploy: <b>${deployed} token</b>\n\n`;
+    }
+
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👇 <i>Pilih wallet di bawah untuk membuka pengaturan detail:</i>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('1️⃣ Atur Wallet 1 (Utama)', 'cmd_wallet_view_1'),
+        Markup.button.callback('2️⃣ Atur Wallet 2', 'cmd_wallet_view_2')
+      ],
+      [
+        Markup.button.callback('3️⃣ Atur Wallet 3', 'cmd_wallet_view_3'),
+        Markup.button.callback('🚀 Deploy 3 Wallet Sekaligus', 'cmd_deploy_all_wallets')
+      ],
+      [
+        Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')
+      ]
+    ]);
+
+    await ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendWalletDetail(ctx, walletIndex) {
+    const idx = Number(walletIndex) || 1;
+    const w = await clankerService.getWalletInfo(idx);
+    const wConfig = storage.getWalletConfig(idx);
+    const deployedTokens = storage.getDeployedTokensByWallet(idx);
+    const isPrimary = idx === 1;
+
+    let msg = `👛 <b>PENGATURAN TERPISAH: ${escapeHtml(w.name)}</b>\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `• Peran: <b>${isPrimary ? 'Wallet Utama (Primary)' : `Wallet Tambahan #${idx}`}</b>\n`;
+    msg += `• Status Kunci: <b>${w.hasWallet ? '✅ Terkonfigurasi' : '⚠️ Belum Dipasang (Klik tombol di bawah)'}</b>\n`;
+    msg += `• Alamat Base: <code>${w.address}</code>\n`;
+    msg += `• Saldo Base ETH: <b>${w.balanceEth} ETH</b>\n`;
+    msg += `• Auto-Deploy Wallet Ini: <b>${w.enabled ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)'}</b>\n`;
+    msg += `• Dev Buy ETH: <code>${wConfig.devBuyEth || config.devBuyEth} ETH</code>\n`;
+    msg += `• Permanent Fee: <code>${wConfig.feePercent || config.permanentFeePercent}%</code>\n`;
+    msg += `• Creator Vault: <code>${wConfig.vaultPercent || config.creatorVaultPercent}%</code>\n`;
+    msg += `• Total Token Dideploy: <b>${deployedTokens.length} Token</b>\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👇 <i>Pilih aksi untuk ${w.name}:</i>`;
+
+    const toggleText = w.enabled ? '🔴 Matikan Auto-Deploy' : '🟢 Aktifkan Auto-Deploy';
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(toggleText, `cmd_wallet_toggle_${idx}`),
+        Markup.button.callback('🔑 Pasang / Ubah Key', `cmd_wallet_setkey_${idx}`)
+      ],
+      [
+        Markup.button.callback(`📜 Riwayat Deploy (${deployedTokens.length})`, `cmd_wallet_hist_${idx}`),
+        Markup.button.callback('⬅️ Kembali ke 3 Wallet', 'cmd_wallets_menu')
+      ]
+    ]);
+
+    await ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendWalletSetKeyPrompt(ctx, walletIndex) {
+    const idx = Number(walletIndex) || 1;
+    const msg = 
+`🔑 <b>PANDUAN MEMASANG PRIVATE KEY WALLET ${idx}:</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan format:
+
+<code>/setkey${idx} &lt;0x_private_key_anda&gt;</code>
+
+<b>Contoh:</b>
+<code>/setkey${idx} 0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code>
+
+🛡️ <b>JAMINAN KEAMANAN:</b>
+<i>Bot akan secara otomatis MENGHAPUS (auto-delete) pesan Anda yang berisi private key seketika setelah diterima, sehingga kunci rahasia Anda tidak akan tertinggal di riwayat obrolan Telegram! Kunci disimpan aman pada konfigurasi bot.</i>`;
+
+    await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
+      [Markup.button.callback(`⬅️ Kembali ke Wallet ${idx}`, `cmd_wallet_view_${idx}`)]
+    ]));
+  }
+
+  async handleSetKeyCommand(ctx, walletIndex) {
+    const idx = Number(walletIndex) || 1;
+    const text = (ctx.message?.text || '').trim();
+    const parts = text.split(/\s+/);
+    const key = parts[1]?.trim();
+
+    // Delete the incoming message immediately for user security!
+    try {
+      await ctx.deleteMessage().catch(() => {});
+    } catch (e) {}
+
+    if (!key || !key.startsWith('0x') || key.length !== 66) {
+      return ctx.replyWithHTML(`⚠️ <b>Format Private Key tidak valid!</b>\nPrivate key harus diawali dengan <code>0x</code> dan memiliki panjang tepat 66 karakter heksadesimal.\n\nContoh: <code>/setkey${idx} 0x1234...</code>`);
+    }
+
+    try {
+      storage.setWalletPrivateKey(idx, key);
+      clankerService.reloadWallets();
+      const wInfo = await clankerService.getWalletInfo(idx);
+
+      await ctx.replyWithHTML(
+        `✅ <b>BERHASIL! Private Key Wallet ${idx} Telah Dipasang!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Wallet: <b>${escapeHtml(wInfo.name)}</b>\n` +
+        `• Alamat Base: <code>${wInfo.address}</code>\n` +
+        `• Saldo Realtime: <b>${wInfo.balanceEth} ETH</b>\n` +
+        `• Pesan Anda telah dihapus secara aman dari riwayat chat demi privasi.\n━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback(`⚙️ Buka Pengaturan Wallet ${idx}`, `cmd_wallet_view_${idx}`)],
+          [Markup.button.callback('👛 Pusat 3 Wallet', 'cmd_wallets_menu')]
+        ])
+      );
+    } catch (err) {
+      console.error(`Error saving private key for wallet ${idx}:`, err);
+      await ctx.replyWithHTML(`❌ <b>Gagal memasang private key:</b> ${escapeHtml(err.message)}`);
+    }
+  }
+
+  async handleManualDeployWallet(ctx, walletIndex) {
+    const idx = Number(walletIndex) || 1;
+    const parts = (ctx.message?.text || '').split(' ').slice(1);
+    if (parts.length < 2) {
+      return ctx.replyWithHTML(
+        `⚠️ <b>Format salah untuk Wallet ${idx}!</b>\n` +
+        `Gunakan: <code>/deploy${idx} &lt;NamaToken&gt; &lt;Ticker&gt; [URL_Gambar]</code>\n` +
+        `Contoh: <code>/deploy${idx} CyberCat CCAT https://example.com/cat.png</code>`
+      );
+    }
+
+    const name = parts[0];
+    const symbol = parts[1].toUpperCase();
+    const imageUrl = parts[2] || '';
+
+    await ctx.replyWithHTML(`🚀 Memulai deploy via <b>Wallet ${idx}</b> untuk <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)...\nHarap tunggu proses di Base network.`);
+
+    const res = await clankerService.deployTokenForWallet({
+      walletIndex: idx,
+      name,
+      symbol,
+      imageUrl,
+      poolAddress: `manual_deploy_w${idx}`
+    });
+
+    if (res.success) {
+      let msg = `🎉 <b>DEPLOY VIA WALLET ${idx} BERHASIL!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `✅ <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)\n`;
+      msg += `• Deployer: <code>${res.walletAddress}</code>\n`;
+      msg += `• Contract: <code>${res.tokenAddress}</code>\n`;
+      msg += `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n`;
+      await ctx.replyWithHTML(msg, { disable_web_page_preview: true });
+    } else {
+      await ctx.replyWithHTML(`❌ <b>Deploy via Wallet ${idx} gagal:</b> ${escapeHtml(res.error || 'Unknown error')}`);
+    }
+  }
+
+  async sendWalletHistoryMessage(ctx, walletIndex) {
+    const idx = Number(walletIndex) || 1;
+    const history = storage.getDeployedTokensByWallet(idx).slice(0, 8);
+    if (history.length === 0) {
+      return ctx.replyWithHTML(
+        `📜 Belum ada token yang dideploy oleh <b>Wallet ${idx}</b>.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback(`⬅️ Kembali ke Wallet ${idx}`, `cmd_wallet_view_${idx}`)]
+        ])
+      );
+    }
+
+    let msg = `📜 <b>RIWAYAT DEPLOY WALLET ${idx} (${history.length} Token):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    for (const item of history) {
+      msg += `• <b>${escapeHtml(item.name)}</b> (<code>$${escapeHtml(item.symbol)}</code>)\n`;
+      msg += `  Contract: <code>${item.tokenAddress}</code>\n`;
+      msg += `  <a href="${item.basescanUrl}">BaseScan</a> | <a href="${item.dexscreenerUrl}">DexScreener</a> | <a href="${item.clankerUrl}">Clanker</a>\n\n`;
+    }
+
+    await ctx.replyWithHTML(msg, {
+      disable_web_page_preview: true,
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(`⬅️ Kembali ke Wallet ${idx}`, `cmd_wallet_view_${idx}`)],
+        [Markup.button.callback('👛 Pusat 3 Wallet', 'cmd_wallets_menu')]
+      ])
+    });
+  }
+
+  async executeDeployAllWallets(ctx) {
+    try {
+      await ctx.reply('🔍 Memindai radar token hype terlengkap (OKX, Clanker, DexScreener, GeckoTerminal) untuk 3 wallet...');
+      const activeWallets = clankerService.getActiveWallets();
+      if (!activeWallets || activeWallets.length === 0) {
+        return ctx.reply('⚠️ Tidak ada wallet yang aktif atau memiliki private key.');
+      }
+
+      const gasInfo = await clankerService.getGasInfo();
+      const distinctCandidates = await trendingService.getDistinctNewCandidates(activeWallets.length);
+
+      let msg = `🚀 <b>MENGEKSEKUSI DEPLOY SIMULTAN (${activeWallets.length} WALLET SEKALIGUS)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `⛽ Gas Base: <code>${gasInfo.gasPriceGwei} Gwei</code> (${gasInfo.recommendation})\n`;
+      msg += `Masing-masing wallet mendeploy token BERBEDA dari radar hype:\n\n`;
+
+      for (let i = 0; i < activeWallets.length; i++) {
+        const w = activeWallets[i];
+        const cand = distinctCandidates[i];
+        if (cand) {
+          msg += `👛 <b>${w.name}:</b> <b>${escapeHtml(cand.name)}</b> (<code>$${escapeHtml(cand.symbol)}</code>)\n`;
+          msg += `  • Sumber: <i>${escapeHtml(cand.sourceType)}</i> (${cand.sourceNetwork})\n`;
+        }
+      }
+      msg += `\n⏳ <i>Memproses transaksi simultan di Base Layer 2...</i>`;
+      await ctx.replyWithHTML(msg);
+
+      const results = await clankerService.deployMultiWalletSimultaneous(distinctCandidates);
+
+      let summaryMsg = `🎉 <b>HASIL DEPLOY SIMULTAN MULTI-WALLET:</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      for (const res of results) {
+        if (res.success) {
+          summaryMsg += `✅ <b>${res.walletName}:</b> <b>${escapeHtml(res.targetName)}</b> (<code>$${escapeHtml(res.targetSymbol)}</code>)\n`;
+          summaryMsg += `• Deployer: <code>${res.walletAddress}</code>\n`;
+          summaryMsg += `• Contract: <code>${res.tokenAddress}</code>\n`;
+          summaryMsg += `• Links: <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
+        } else {
+          summaryMsg += `❌ <b>${res.walletName}:</b> Gagal - <i>${escapeHtml(res.error || 'Unknown error')}</i>\n\n`;
+        }
+      }
+
+      await ctx.replyWithHTML(summaryMsg, {
+        disable_web_page_preview: true,
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('👛 Kelola 3 Wallet', 'cmd_wallets_menu')],
+          [Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')]
+        ])
+      });
+    } catch (err) {
+      console.error('Error in executeDeployAllWallets:', err);
+      await ctx.replyWithHTML(`❌ <b>Gagal deploy simultan:</b> ${escapeHtml(err.message)}`);
+    }
   }
 
   async start() {

@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { storage } from './storage.js';
 import { xRadarService } from './xRadarService.js';
+import { aiEngine } from './aiEngine.js';
 
 export class TrendingService {
   constructor() {
@@ -14,6 +15,129 @@ export class TrendingService {
 
   async getXAlphaTrending() {
     return xRadarService.getXAlphaTrending();
+  }
+
+  /**
+   * 0.1 Fetch OKX Hot Tokens (Trending by token score & X social mentions + spot gainers)
+   */
+  async getOkxHotTokens() {
+    const cacheKey = 'okx_hot_tokens';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    const results = [];
+    const seen = new Set();
+
+    // 1. OKX Web3 Hot Tokens - Trending (rankingType=4) & X-mentioned (rankingType=5)
+    const rankingTypes = [
+      { type: '4', label: 'OKX DEX Trending' },
+      { type: '5', label: 'OKX X-Social Hype' }
+    ];
+
+    for (const r of rankingTypes) {
+      try {
+        const url = `https://web3.okx.com/api/v6/dex/market/token/hot-token?rankingType=${r.type}&rankingTimeFrame=4&riskFilter=true`;
+        const json = await this.safeFetchJson(url, {
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        });
+
+        if (json && Array.isArray(json.data)) {
+          for (const item of json.data) {
+            const symbol = (item.tokenSymbol || item.symbol || '').trim().toUpperCase();
+            const name = (item.tokenName || item.name || symbol).trim();
+            if (!symbol || !name || seen.has(symbol)) continue;
+            seen.add(symbol);
+
+            const chainMap = {
+              '8453': 'BASE',
+              '1': 'ETH',
+              '501': 'SOLANA',
+              '56': 'BSC',
+              '137': 'POLYGON',
+              '42161': 'ARBITRUM'
+            };
+            const chain = chainMap[String(item.chainIndex)] || 'OKX-Web3';
+
+            results.push({
+              id: `okx_${symbol.toLowerCase()}_${(item.tokenContractAddress || '').slice(0, 8)}`,
+              name,
+              symbol,
+              imageUrl: item.tokenLogoUrl || item.logoUrl || 'https://assets.coingecko.com/coins/images/placeholder.png',
+              priceUsd: String(item.price || item.priceUsd || '0'),
+              fdvUsd: String(item.marketCap || '0'),
+              volume24h: parseFloat(item.volume24h || item.tradeAmount || '0').toFixed(2),
+              sourceNetwork: chain,
+              sourceType: r.label,
+              poolAddress: item.tokenContractAddress || '',
+              poolName: `${symbol} (${r.label})`,
+              sourceUrl: item.tokenContractAddress ? `https://www.okx.com/web3/dex-market/token/${item.tokenContractAddress}` : 'https://www.okx.com/web3'
+            });
+          }
+        }
+      } catch (e) {
+        // Continue gracefully
+      }
+    }
+
+    // 2. OKX Spot High-Momentum Tickers
+    if (results.length < 10) {
+      try {
+        const spotUrl = 'https://www.okx.com/api/v5/market/tickers?instType=SPOT';
+        const spotJson = await this.safeFetchJson(spotUrl, {
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        });
+
+        if (spotJson && Array.isArray(spotJson.data)) {
+          const spotTokens = spotJson.data
+            .filter(t => t.instId && t.instId.endsWith('-USDT'))
+            .map(t => {
+              const sym = t.instId.replace('-USDT', '').trim().toUpperCase();
+              const open24h = parseFloat(t.open24h) || 0;
+              const last = parseFloat(t.last) || 0;
+              const changePct = open24h > 0 ? ((last - open24h) / open24h) * 100 : 0;
+              const volUsd = (parseFloat(t.volCcy24h) || 0);
+              return { sym, last, changePct, volUsd };
+            })
+            .filter(t => t.volUsd > 50000 && !['USDC', 'USDT', 'DAI', 'FDUSD', 'TUSD', 'EUR', 'BUSD'].includes(t.sym))
+            .sort((a, b) => b.changePct - a.changePct)
+            .slice(0, 15);
+
+          for (const st of spotTokens) {
+            if (!seen.has(st.sym)) {
+              seen.add(st.sym);
+              results.push({
+                id: `okx_spot_${st.sym.toLowerCase()}`,
+                name: `${st.sym} Token`,
+                symbol: st.sym,
+                imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
+                priceUsd: String(st.last),
+                fdvUsd: '0',
+                volume24h: st.volUsd.toFixed(2),
+                sourceNetwork: 'OKX-Spot',
+                sourceType: 'OKX Hot Gainers',
+                poolAddress: '',
+                poolName: `${st.sym} (OKX Top Gainer +${st.changePct.toFixed(1)}%)`,
+                sourceUrl: `https://www.okx.com/trade-spot/${st.sym.toLowerCase()}-usdt`
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback gracefully
+      }
+    }
+
+    if (results.length > 0) {
+      this.cache.set(cacheKey, { data: results, time: Date.now() });
+      return results;
+    }
+
+    if (cached && cached.data && cached.data.length > 0) return cached.data;
+    return [];
   }
 
   /**
@@ -771,10 +895,11 @@ export class TrendingService {
 
   /**
    * 5. Get Combined All-in-One Multi-Chain & Multi-Platform Trending
-   * Aggregates Clanker.world, Fresh High-Exposure, Robinhood, ARC, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
+   * Aggregates OKX Hot Tokens, Clanker.world, Fresh High-Exposure, Robinhood, ARC, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
    */
   async getAllTrendingTokens() {
     const [
+      okxHot,
       clankerWorld,
       freshHighExposure,
       robinhood,
@@ -791,6 +916,7 @@ export class TrendingService {
       ethGecko,
       bscGecko
     ] = await Promise.all([
+      this.getOkxHotTokens(),
       this.getClankerWorldTrending(),
       this.getFreshHighExposureTrending(),
       this.getRobinhoodTrending(),
@@ -813,6 +939,7 @@ export class TrendingService {
 
     // Round-robin mix from each source for variety
     const maxLen = Math.max(
+      okxHot.length,
       clankerWorld.length,
       freshHighExposure.length,
       robinhood.length,
@@ -832,7 +959,8 @@ export class TrendingService {
 
     for (let i = 0; i < maxLen; i++) {
       const candidates = [
-        clankerWorld[i],       // Prioritize official Clanker.world trending now
+        okxHot[i],             // OKX Web3 Hot Tokens & Social Hype
+        clankerWorld[i],       // Official Clanker.world trending now
         freshHighExposure[i],  // Koin baru umur muda dengan exposure tinggi lintas chain
         robinhood[i],          // Robinhood L2 trending
         arc[i],                // ARC network trending
@@ -866,6 +994,48 @@ export class TrendingService {
   async getNewTrendingCandidates() {
     const all = await this.getAllTrendingTokens();
     return all.filter(token => !storage.isTokenAlreadyDeployed(token.symbol, token.name));
+  }
+
+  /**
+   * Get multiple distinct candidates for multi-wallet deployments
+   * Ensures all candidates have distinct symbols, names, and are not yet deployed.
+   * If external sources have fewer candidates than requested count, AI creates distinct candidates.
+   */
+  async getDistinctNewCandidates(count = 3) {
+    const all = await this.getAllTrendingTokens();
+    const distinct = [];
+    const seenSymbols = new Set();
+    const seenNames = new Set();
+
+    for (const token of all) {
+      const sym = (token.symbol || '').trim().toUpperCase();
+      const name = (token.name || '').trim().toLowerCase();
+      if (!sym || seenSymbols.has(sym) || seenNames.has(name)) continue;
+
+      if (storage.isTokenAlreadyDeployed(token.symbol, token.name)) {
+        continue;
+      }
+
+      seenSymbols.add(sym);
+      seenNames.add(name);
+      distinct.push(token);
+
+      if (distinct.length >= count) break;
+    }
+
+    // Fill remaining with distinct AI Alpha tokens if needed
+    let aiAttempt = 0;
+    while (distinct.length < count && aiAttempt < 10) {
+      aiAttempt++;
+      const aiCand = aiEngine.generateDistinctAlphaCandidate(seenSymbols, seenNames);
+      if (aiCand) {
+        seenSymbols.add(aiCand.symbol.toUpperCase());
+        seenNames.add(aiCand.name.toLowerCase());
+        distinct.push(aiCand);
+      }
+    }
+
+    return distinct;
   }
 }
 

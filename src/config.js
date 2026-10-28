@@ -45,7 +45,9 @@ export const config = {
   // Blockchain / Base Network Settings
   rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
   chainId: 8453,
-  privateKey: process.env.PRIVATE_KEY || '',
+  privateKey: process.env.PRIVATE_KEY_1 || process.env.PRIVATE_KEY || '',
+  privateKey2: process.env.PRIVATE_KEY_2 || '',
+  privateKey3: process.env.PRIVATE_KEY_3 || '',
   pinataJwt: process.env.PINATA_JWT || '',
   
   // Dry run mode: if true, simulates deployments without sending real transactions
