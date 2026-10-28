@@ -490,6 +490,61 @@ export class ClankerService {
   }
 
   /**
+   * Deploy a manually selected token across ALL active wallets simultaneously
+   * (Wallet 1 Utama, Wallet 2, Wallet 3 all deploy this token!)
+   */
+  async deployManualTokenAcrossWallets(token, options = {}) {
+    const activeWallets = this.getActiveWallets();
+    // If no active wallets with key found, fall back to all initialized wallets (1, 2, 3) in simulation mode
+    const walletsToDeploy = activeWallets.length > 0 ? activeWallets : [this.getWallet(1), this.getWallet(2), this.getWallet(3)];
+    
+    const suffix = storage.getRepeatSuffix();
+    const shouldRepeat = Boolean(suffix && suffix.toUpperCase() !== 'NONE');
+    const repeatCount = shouldRepeat ? 2 : 1;
+
+    console.log(`[Manual Multi-Wallet Deploy] Deploying "${token.name}" ($${token.symbol}) across ${walletsToDeploy.length} wallets (repeat: ${repeatCount}x)...`);
+
+    const allResults = [];
+    for (let r = 0; r < repeatCount; r++) {
+      const isSuffixRound = r > 0;
+      const roundName = isSuffixRound ? `${token.name} ${suffix}` : token.name;
+      const roundSymbol = token.symbol;
+
+      const roundTasks = walletsToDeploy.map(async (wallet) => {
+        console.log(`[Manual Deploy Round ${r + 1}] Executing "${roundName}" for ${wallet.name} (${wallet.account?.address || 'Simulasi'})...`);
+        const res = await this.deployTokenForWallet({
+          walletIndex: wallet.id,
+          name: roundName,
+          symbol: roundSymbol,
+          imageUrl: token.imageUrl,
+          originPool: token.poolAddress || token.id || 'manual_trending',
+          customDescription: token.description || '',
+          options
+        });
+
+        return {
+          round: r + 1,
+          walletIndex: wallet.id,
+          walletName: wallet.name,
+          walletAddress: wallet.account?.address || res.walletAddress || '',
+          targetName: roundName,
+          targetSymbol: roundSymbol,
+          ...res
+        };
+      });
+
+      const roundResults = await Promise.all(roundTasks);
+      allResults.push(...roundResults);
+
+      if (r < repeatCount - 1) {
+        await new Promise(res => setTimeout(res, 4000));
+      }
+    }
+
+    return allResults;
+  }
+
+  /**
    * Execute batch deployment for trending token (legacy single wallet batch)
    */
   async deployTrendingBatch(token, walletIndex = 1) {

@@ -239,9 +239,17 @@ export class TelegramBotApp {
       if (parts.length > 0) {
         const text = parts.join(' ');
         const candidate = xRadarService.parseCustomTweet(text);
-        await ctx.replyWithHTML(`🐦 <b>KANDIDAT DARI X TWEET:</b>\n\n• Nama: <b>${escapeHtml(candidate.name)}</b> (<code>$${escapeHtml(candidate.symbol)}</code>)\n• Narasi: <i>${escapeHtml(text)}</i>\n\n<i>Memulai deploy ke Base via Clanker...</i>`);
-        const results = await clankerService.deployTrendingBatch(candidate);
-        return this.sendBatchDeploymentSummary(ctx, results);
+        const activeWallets = clankerService.getActiveWallets();
+        const walletCount = activeWallets.length > 0 ? activeWallets.length : 3;
+
+        await ctx.replyWithHTML(
+          `🐦 <b>KANDIDAT DARI X TWEET:</b>\n\n` +
+          `• Nama: <b>${escapeHtml(candidate.name)}</b> (<code>$${escapeHtml(candidate.symbol)}</code>)\n` +
+          `• Narasi: <i>${escapeHtml(text)}</i>\n\n` +
+          `⏳ <i>Memulai deploy simultan ke SEMUA WALLET (${walletCount} Wallet) di Base via Clanker...</i>`
+        );
+        const results = await clankerService.deployManualTokenAcrossWallets(candidate);
+        return this.sendManualMultiWalletDeploySummary(ctx, candidate, results);
       }
       await this.sendXRadarMenu(ctx);
     });
@@ -267,27 +275,44 @@ export class TelegramBotApp {
       );
     });
 
-    // /deploy <name> <symbol> <imageUrl>
+    // /deploy <name> <symbol> <imageUrl> -> Deploys across ALL wallets simultaneously
     bot.command('deploy', async (ctx) => {
       const parts = ctx.message.text.split(' ').slice(1);
       if (parts.length < 2) {
-        return ctx.replyWithHTML('⚠️ <b>Format salah!</b>\nGunakan: <code>/deploy &lt;NamaToken&gt; &lt;Ticker&gt; [URL_Gambar]</code>\nContoh: <code>/deploy SuperDog SDOG https://example.com/logo.png</code>');
+        return ctx.replyWithHTML(
+          '⚠️ <b>Format salah!</b>\n' +
+          'Gunakan: <code>/deploy &lt;NamaToken&gt; &lt;Ticker&gt; [URL_Gambar]</code>\n' +
+          'Contoh: <code>/deploy SuperDog SDOG https://example.com/logo.png</code>\n\n' +
+          '💡 <i>Perintah ini otomatis mendeploy token ke SEMUA WALLET sekaligus. Jika hanya ingin mendeploy via wallet tertentu, gunakan:</i>\n' +
+          '• <code>/deploy1</code> (Wallet 1 Utama)\n' +
+          '• <code>/deploy2</code> (Wallet 2)\n' +
+          '• <code>/deploy3</code> (Wallet 3)'
+        );
       }
 
       const name = parts[0];
       const symbol = parts[1].toUpperCase();
       const imageUrl = parts[2] || '';
-
-      await ctx.replyWithHTML(`🚀 Memulai deploy batch untuk <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)...\nHarap tunggu proses di Base network.`);
-      
-      const batchResults = await clankerService.deployTrendingBatch({
+      const targetToken = {
         name,
         symbol,
         imageUrl,
         poolAddress: 'manual_deploy'
-      });
+      };
 
-      await this.sendBatchDeploymentSummary(ctx, batchResults);
+      const activeWallets = clankerService.getActiveWallets();
+      const walletCount = activeWallets.length > 0 ? activeWallets.length : 3;
+
+      await ctx.replyWithHTML(
+        `🚀 <b>Memulai Deploy Manual ke SEMUA WALLET (${walletCount} Wallet Sekaligus)!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Token: <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)\n` +
+        `• Target: <b>Semua Wallet Aktif (W1, W2, W3)</b>\n\n` +
+        `⏳ <i>Harap tunggu proses transaksi on-chain di Base network...</i>`
+      );
+      
+      const batchResults = await clankerService.deployManualTokenAcrossWallets(targetToken);
+      await this.sendManualMultiWalletDeploySummary(ctx, targetToken, batchResults);
     });
 
     // Action Handlers
@@ -509,8 +534,9 @@ export class TelegramBotApp {
     });
 
     // Dynamic Deploy Button Action with short callback data (safe < 64 bytes)
+    // DEPLOYS ACROSS ALL WALLETS SIMULTANEOUSLY!
     bot.action(/^d_idx_(\d+)$/, async (ctx) => {
-      await ctx.answerCbQuery('Memulai proses deploy...').catch(() => {});
+      await ctx.answerCbQuery('Memulai proses deploy di SEMUA wallet...').catch(() => {});
       const idx = parseInt(ctx.match[1], 10);
       let targetToken = this.trendingCache ? this.trendingCache[idx] : null;
 
@@ -523,20 +549,27 @@ export class TelegramBotApp {
         return ctx.reply('⚠️ Data token tidak ditemukan. Silakan buka /trending untuk memperbarui daftar.');
       }
 
+      const activeWallets = clankerService.getActiveWallets();
+      const walletCount = activeWallets.length > 0 ? activeWallets.length : 3;
       const activeSuffix = storage.getRepeatSuffix();
       const isNone = activeSuffix.toUpperCase() === 'NONE';
-      const suffixText = isNone 
-        ? `1. <code>${escapeHtml(targetToken.name)}</code> (1x Deploy)` 
-        : `1. <code>${escapeHtml(targetToken.name)}</code>\n2. <code>${escapeHtml(targetToken.name)} ${escapeHtml(activeSuffix)}</code>`;
+      const suffixInfo = isNone ? '1x Deploy' : `2x Deploy (+ "${activeSuffix}")`;
 
-      await ctx.replyWithHTML(`⏳ <b>Memulai Deploy Clanker</b> untuk <b>${escapeHtml(targetToken.name)}</b> (<code>$${escapeHtml(targetToken.symbol)}</code>)...\n${suffixText}`);
+      await ctx.replyWithHTML(
+        `⏳ <b>Memulai Deploy Manual ke SEMUA WALLET (${walletCount} Wallet Sekaligus)!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Token: <b>${escapeHtml(targetToken.name)}</b> (<code>$${escapeHtml(targetToken.symbol)}</code>)\n` +
+        `• Mode: <b>${suffixInfo}</b>\n` +
+        `• Target: <b>Wallet 1 (Utama), Wallet 2, Wallet 3</b>\n\n` +
+        `<i>Memproses transaksi simultan di Base Layer 2 via Clanker v4...</i>`
+      );
 
-      const results = await clankerService.deployTrendingBatch(targetToken);
-      await this.sendBatchDeploymentSummary(ctx, results);
+      const results = await clankerService.deployManualTokenAcrossWallets(targetToken);
+      await this.sendManualMultiWalletDeploySummary(ctx, targetToken, results);
     });
 
     bot.action(/^deploy_(.+)$/, async (ctx) => {
-      await ctx.answerCbQuery('Memulai proses deploy...').catch(() => {});
+      await ctx.answerCbQuery('Memulai proses deploy di SEMUA wallet...').catch(() => {});
       const targetPoolId = ctx.match[1];
       
       const trending = await geckoService.getTrendingTokens();
@@ -546,16 +579,23 @@ export class TelegramBotApp {
         return ctx.reply('⚠️ Data token tidak ditemukan atau sudah kadaluarsa di cache GeckoTerminal. Silakan refresh /trending.');
       }
 
+      const activeWallets = clankerService.getActiveWallets();
+      const walletCount = activeWallets.length > 0 ? activeWallets.length : 3;
       const activeSuffix = storage.getRepeatSuffix();
       const isNone = activeSuffix.toUpperCase() === 'NONE';
-      const suffixText = isNone 
-        ? `1. <code>${escapeHtml(targetToken.name)}</code> (1x Deploy)` 
-        : `1. <code>${escapeHtml(targetToken.name)}</code>\n2. <code>${escapeHtml(targetToken.name)} ${escapeHtml(activeSuffix)}</code>`;
+      const suffixInfo = isNone ? '1x Deploy' : `2x Deploy (+ "${activeSuffix}")`;
 
-      await ctx.replyWithHTML(`⏳ <b>Memulai Deploy Clanker</b> untuk <b>${escapeHtml(targetToken.name)}</b> (<code>$${escapeHtml(targetToken.symbol)}</code>)...\n${suffixText}`);
+      await ctx.replyWithHTML(
+        `⏳ <b>Memulai Deploy Manual ke SEMUA WALLET (${walletCount} Wallet Sekaligus)!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Token: <b>${escapeHtml(targetToken.name)}</b> (<code>$${escapeHtml(targetToken.symbol)}</code>)\n` +
+        `• Mode: <b>${suffixInfo}</b>\n` +
+        `• Target: <b>Wallet 1 (Utama), Wallet 2, Wallet 3</b>\n\n` +
+        `<i>Memproses transaksi simultan di Base Layer 2 via Clanker v4...</i>`
+      );
 
-      const results = await clankerService.deployTrendingBatch(targetToken);
-      await this.sendBatchDeploymentSummary(ctx, results);
+      const results = await clankerService.deployManualTokenAcrossWallets(targetToken);
+      await this.sendManualMultiWalletDeploySummary(ctx, targetToken, results);
     });
   }
 
@@ -1162,7 +1202,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
 • Link Asal: <a href="${escapeHtml(token.sourceUrl)}">Info Pool / Token</a>`;
 
         const buttons = [
-          [Markup.button.callback(`🚀 Deploy ke Base via Clanker`, `d_idx_${index}`)]
+          [Markup.button.callback(`🚀 Deploy ke Base (Semua Wallet)`, `d_idx_${index}`)]
         ];
 
         try {
@@ -1227,6 +1267,40 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
     await ctx.replyWithHTML(summary, {
       disable_web_page_preview: true,
       ...Markup.inlineKeyboard([
+        [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
+      ])
+    });
+  }
+
+  /**
+   * Mengirim ringkasan deploy manual ke SEMUA wallet sekaligus
+   */
+  async sendManualMultiWalletDeploySummary(ctx, token, results) {
+    let summary = `🎉 <b>HASIL DEPLOY MANUAL SEMUA WALLET (BASE)</b>\n`;
+    summary += `🪙 Token: <b>${escapeHtml(token.name)}</b> (<code>$${escapeHtml(token.symbol)}</code>)\n`;
+    summary += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    for (const res of results) {
+      const tag = res.walletName || `Wallet ${res.walletIndex}`;
+      const roundTag = res.round > 1 ? ` (Batch ke-${res.round})` : '';
+
+      if (res.success) {
+        summary += `✅ <b>${tag}${roundTag}:</b> <b>${escapeHtml(res.targetName)}</b>\n`;
+        summary += `• Mode: ${res.simulated ? '🧪 Simulasi (Tanpa Key)' : '⚡ On-Chain Sukses'}\n`;
+        summary += `• Deployer: <code>${res.walletAddress}</code>\n`;
+        summary += `• Contract: <code>${res.tokenAddress}</code>\n`;
+        summary += `• <a href="${res.basescanUrl}">BaseScan</a> | <a href="${res.dexscreenerUrl}">DexScreener</a> | <a href="${res.clankerUrl}">Clanker</a>\n\n`;
+      } else {
+        summary += `❌ <b>${tag}${roundTag}:</b> Gagal - <i>${escapeHtml(res.error || 'Unknown error')}</i>\n\n`;
+      }
+    }
+
+    summary += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚡ Semua wallet telah selesai mengeksekusi deployment!`;
+
+    await ctx.replyWithHTML(summary, {
+      disable_web_page_preview: true,
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('👛 Kelola 3 Wallet', 'cmd_wallets_menu')],
         [Markup.button.callback('⬅️ Kembali ke Dashboard', 'cmd_start_menu')]
       ])
     });
