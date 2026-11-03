@@ -257,12 +257,17 @@ export class ClankerService {
     const adminAddress = w.account?.address || '0x000000000000000000000000000000000000dEaD';
     const description = this.generateProDescription(name, symbol, customDescription);
     
-    // Fee calculation: e.g. 3% = 300 bps (150 clankerFee + 150 pairedFee in hundredths of bps: 150 each)
+    // Fee calculation: 3% fee means 300 bps Buy Fee (pairedFee) and 300 bps Sell Fee (clankerFee)
     const feePct = options.feePercent !== undefined ? options.feePercent : (wConfig.feePercent !== undefined ? wConfig.feePercent : config.permanentFeePercent);
-    const halfBps = Math.round((feePct * 100) / 2);
+    const feeBps = Math.round(feePct * 100);
 
     // Sniper tax decay: max 120s
     const sniperDecay = options.sniperTaxDurationSec || config.sniperTaxDurationSec;
+    const targetSniperPct = options.startingSniperFeePercent !== undefined ? options.startingSniperFeePercent : (config.startingSniperFeePercent || 80);
+    // In Clanker Mev Hook, displayed starting sniper fee = pool_fee * 1.2
+    // To achieve target 80% on Clanker: base pool fee is (80 / 1.2) * 10000 = 666667 unibps (or SDK default 666777)
+    const startingFeeUnibps = Math.min(Math.max(Math.round((targetSniperPct / 1.2) * 10000), 30000), 800000);
+    const endingFeeUnibps = Math.min(Math.max(feeBps * 100, 30000), startingFeeUnibps - 1);
 
     // Creator vault: minimum 7 days lockup duration enforced by Clanker contract
     const vaultPct = options.creatorVaultPercent !== undefined ? options.creatorVaultPercent : (wConfig.vaultPercent !== undefined ? wConfig.vaultPercent : config.creatorVaultPercent);
@@ -291,12 +296,12 @@ export class ClankerService {
       },
       fees: {
         type: 'static',
-        clankerFee: halfBps,
-        pairedFee: halfBps
+        clankerFee: feeBps,
+        pairedFee: feeBps
       },
       sniperFees: {
-        startingFee: 500000, // 50% initial anti-snipe tax
-        endingFee: 30000,    // 3% normal rate
+        startingFee: startingFeeUnibps,
+        endingFee: endingFeeUnibps,
         secondsToDecay: Math.min(sniperDecay, 120) // decays in 120 seconds
       },
       vault: {

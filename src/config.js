@@ -61,7 +61,8 @@ export const config = {
   // Clanker Deployment Defaults (as requested)
   autoDeploy: process.env.AUTO_DEPLOY === 'true', // Auto deploy toggle
   devBuyEth: parseFloat(process.env.DEV_BUY_ETH || '0.0000001'), // Dev buy 0.0000001 ETH (Lowest cost mode)
-  permanentFeePercent: parseFloat(process.env.PERMANENT_FEE_PERCENT || '3'), // 3% total permanent fee
+  permanentFeePercent: parseFloat(process.env.PERMANENT_FEE_PERCENT || '3'), // 3% buy fee & 3% sell fee (300 bps each)
+  startingSniperFeePercent: parseFloat(process.env.STARTING_SNIPER_FEE_PERCENT || '80'), // 80% starting sniper anti-bot tax
   sniperTaxDurationSec: parseInt(process.env.SNIPER_TAX_DURATION_SEC || '120', 10), // 120s sniper tax decay
   poolType: process.env.POOL_TYPE || 'Project', // 'Project' or 'Standard' (PoolPositions.Project)
   creatorVaultPercent: parseFloat(process.env.CREATOR_VAULT_PERCENT || '5'), // Creator vault 5%
