@@ -858,7 +858,7 @@ ${walletsDetailedStr}
 🏷️ <b>Suffix Nama Token:</b> <code>${suffixDisplay}</code>
 ⛽ <b>Mode Gas Fee:</b> <code>${gasLabels[gasMode] || gasMode}</code>
 💰 <b>Dev Buy:</b> <code>${config.devBuyEth} ETH</code> (Mode Biaya Terendah)
-💸 <b>Permanent Fee:</b> <code>${config.permanentFeePercent}%</code> (3% Buy Fee & 3% Sell Fee)
+💸 <b>Permanent Fee:</b> <code>${config.permanentFeePercent}%</code> (${config.permanentFeePercent}% Buy Fee & ${config.permanentFeePercent}% Sell Fee)
 🛡️ <b>Sniper Tax:</b> <code>${config.sniperTaxDurationSec} detik</code> (Decay ${config.startingSniperFeePercent || 80}% -&gt; ${config.permanentFeePercent}%)
 🏛️ <b>Creator Vault:</b> <code>${config.creatorVaultPercent}%</code> (Lockup ${config.creatorVaultLockupDays} hari)
 🏊 <b>Pool Type:</b> <code>${config.poolType} (10 Range Positions)</code>
