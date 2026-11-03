@@ -91,6 +91,7 @@ export class TelegramBotApp {
 • <code>/deploy &lt;Nama&gt; &lt;Ticker&gt; [ImageUrl]</code> - Deploy manual via Wallet 1
 • <code>/deploy1</code>, <code>/deploy2</code>, <code>/deploy3</code> - Deploy manual via wallet tertentu
 • <code>/status</code> - Cek saldo ETH 3 wallet & estimasi gas Base
+• <code>/fee [3|10|20]</code> - Atur fee buy & sell token (3%, 10%, 20%)
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -252,6 +253,32 @@ export class TelegramBotApp {
         return this.sendManualMultiWalletDeploySummary(ctx, candidate, results);
       }
       await this.sendXRadarMenu(ctx);
+    });
+
+    // /fee [3|10|20] - Mengatur fee buy & sell token
+    bot.command('fee', async (ctx) => {
+      const arg = (ctx.message.text || '').split(' ')[1];
+      if (arg) {
+        const val = parseInt(arg, 10);
+        if ([3, 10, 20].includes(val)) {
+          const saved = storage.setFeePercent(val);
+          return ctx.replyWithHTML(
+            `✅ <b>Fee Buy & Sell berhasil diubah ke ${saved}%!</b>\n\n` +
+            `• Buy Fee: <code>${saved}%</code>\n` +
+            `• Sell Fee: <code>${saved}%</code>\n\n` +
+            `<i>Berlaku untuk semua wallet (W1, W2, W3).</i>`,
+            Markup.inlineKeyboard([
+              [Markup.button.callback('💸 Menu Fee', 'cmd_fee_menu')],
+              [Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')]
+            ])
+          );
+        } else {
+          return ctx.replyWithHTML(
+            `⚠️ <b>Pilihan fee tidak valid: "${escapeHtml(arg)}"</b>\nPilihan yang tersedia: <code>3</code>, <code>10</code>, atau <code>20</code>%.\nContoh: <code>/fee 20</code>`
+          );
+        }
+      }
+      await this.sendFeeMenu(ctx);
     });
 
     // /autodeploy [on|off|all|primary]
@@ -574,6 +601,29 @@ export class TelegramBotApp {
       await this.sendGasMenu(ctx);
     });
 
+    bot.action('cmd_fee_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendFeeMenu(ctx);
+    });
+
+    bot.action(/^set_fee_(\d+)$/, async (ctx) => {
+      const pct = parseInt(ctx.match[1], 10);
+      const saved = storage.setFeePercent(pct);
+      await ctx.answerCbQuery(`Fee Buy/Sell diatur ke ${saved}%`).catch(() => {});
+      await ctx.replyWithHTML(
+        `✅ <b>Fee Buy & Sell Berhasil Diubah ke ${saved}%!</b>\n\n` +
+        `• <b>Buy Fee:</b> <code>${saved}%</code>\n` +
+        `• <b>Sell Fee:</b> <code>${saved}%</code>\n` +
+        `• <b>Starting Sniper Tax:</b> <code>~80%</code> (Decay 120 detik -&gt; ${saved}%)\n\n` +
+        `<i>Semua deployment berikutnya (Wallet 1, 2, 3) otomatis menerapkan fee ${saved}%.</i>`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('💸 Menu Fee', 'cmd_fee_menu')],
+          [Markup.button.callback('⚙️ Pengaturan', 'cmd_settings')],
+          [Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')]
+        ])
+      );
+    });
+
     bot.action(/^set_gas_(low|ultra_low|standard)$/, async (ctx) => {
       const mode = ctx.match[1];
       const saved = storage.setGasMode(mode);
@@ -728,7 +778,7 @@ Selamat datang di pusat kontrol bot token launchpad Base 3-Wallet!
 ${walletsOverview}
 ⚙️ <b>RADAR HYPE &amp; TOKENOMICS:</b>
 • Radar: <b>OKX Hot Tokens, Clanker, DexScreener, GeckoTerminal, Pump.fun</b>
-• Fee: <b>3% Permanent</b> | Anti-Snipe: <b>120 Detik</b>
+• Fee: <b>${storage.getFeePercent()}% Buy / ${storage.getFeePercent()}% Sell</b> | Anti-Snipe: <b>120 Detik</b>
 • Creator Vault: <b>5%</b> | Batch Duplikasi: <b>${suffixDisplay}</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <i>Pilih menu di bawah:</i>`;
@@ -851,6 +901,8 @@ ${walletsDetailedStr}
       standard: '🔵 Normal (Default)'
     };
 
+    const currentFee = storage.getFeePercent();
+
     const msg = 
 `⚙️ <b>PENGATURAN PARAMETER CLANKER (DEFAULT)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -858,8 +910,8 @@ ${walletsDetailedStr}
 🏷️ <b>Suffix Nama Token:</b> <code>${suffixDisplay}</code>
 ⛽ <b>Mode Gas Fee:</b> <code>${gasLabels[gasMode] || gasMode}</code>
 💰 <b>Dev Buy:</b> <code>${config.devBuyEth} ETH</code> (Mode Biaya Terendah)
-💸 <b>Permanent Fee:</b> <code>${config.permanentFeePercent}%</code> (${config.permanentFeePercent}% Buy Fee & ${config.permanentFeePercent}% Sell Fee)
-🛡️ <b>Sniper Tax:</b> <code>${config.sniperTaxDurationSec} detik</code> (Decay ${config.startingSniperFeePercent || 80}% -&gt; ${config.permanentFeePercent}%)
+💸 <b>Buy & Sell Fee:</b> <code>${currentFee}%</code> (${currentFee}% Buy Fee & ${currentFee}% Sell Fee)
+🛡️ <b>Sniper Tax:</b> <code>${config.sniperTaxDurationSec} detik</code> (Decay ${config.startingSniperFeePercent || 80}% -&gt; ${currentFee}%)
 🏛️ <b>Creator Vault:</b> <code>${config.creatorVaultPercent}%</code> (Lockup ${config.creatorVaultLockupDays} hari)
 🏊 <b>Pool Type:</b> <code>${config.poolType} (10 Range Positions)</code>
 ⏱️ <b>Airdrop Lockup:</b> <code>${config.airdropLockupDays} hari / instan</code>
@@ -875,6 +927,39 @@ ${airdropDetails}
       ],
       [
         Markup.button.callback('⛽ Atur Mode Gas', 'cmd_gas_menu'),
+        Markup.button.callback('💸 Atur Fee Buy/Sell', 'cmd_fee_menu')
+      ],
+      [
+        Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')
+      ]
+    ]));
+  }
+
+  async sendFeeMenu(ctx) {
+    const currentFee = storage.getFeePercent();
+    const check = (pct) => (pct === currentFee ? ' ✅' : '');
+
+    const msg = 
+`💸 <b>PENGATURAN FEE BUY & SELL TOKEN (BASE)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 <b>Fee Aktif Saat Ini:</b> <code>${currentFee}%</code> Buy & <code>${currentFee}%</code> Sell
+
+Pilih fee transaksi yang akan diterapkan pada setiap token baru yang dideploy:
+
+• <b>3% (Rekomendasi Volume)</b>: Biaya rendah, menarik lebih banyak trader & volume transaksi.
+• <b>10% (Agresif / Seimbang)</b>: Menyeimbangkan antara volume transaksi dan pendapatan fee creator.
+• <b>20% (Maksimum Clanker v4)</b>: Batas fee tertinggi yang didukung oleh smart contract Clanker v4. Memaksimalkan perolehan fee bagi creator dari setiap buy dan sell.
+
+<i>💡 Pengaturan ini berlaku untuk semua wallet (W1 Utama, W2, W3) baik saat auto-deploy maupun manual deploy.</i>`;
+
+    await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`💰 3% Fee${check(3)}`, 'set_fee_3'),
+        Markup.button.callback(`💰 10% Fee${check(10)}`, 'set_fee_10'),
+        Markup.button.callback(`💰 20% Fee${check(20)}`, 'set_fee_20')
+      ],
+      [
+        Markup.button.callback('⚙️ Kembali ke Pengaturan', 'cmd_settings'),
         Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')
       ]
     ]));
@@ -1658,7 +1743,7 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
     msg += `• Saldo Base ETH: <b>${w.balanceEth} ETH</b>\n`;
     msg += `• Auto-Deploy Wallet Ini: <b>${w.enabled ? '🟢 AKTIF (ON)' : '🔴 NONAKTIF (OFF)'}</b>\n`;
     msg += `• Dev Buy ETH: <code>${wConfig.devBuyEth || config.devBuyEth} ETH</code>\n`;
-    msg += `• Permanent Fee: <code>${wConfig.feePercent || config.permanentFeePercent}%</code>\n`;
+    msg += `• Buy & Sell Fee: <code>${wConfig.feePercent !== undefined ? wConfig.feePercent : storage.getFeePercent()}%</code>\n`;
     msg += `• Creator Vault: <code>${wConfig.vaultPercent || config.creatorVaultPercent}%</code>\n`;
     msg += `• Total Token Dideploy: <b>${deployedTokens.length} Token</b>\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;

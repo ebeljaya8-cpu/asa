@@ -257,8 +257,8 @@ export class ClankerService {
     const adminAddress = w.account?.address || '0x000000000000000000000000000000000000dEaD';
     const description = this.generateProDescription(name, symbol, customDescription);
     
-    // Fee calculation: 3% fee means 300 bps Buy Fee (pairedFee) and 300 bps Sell Fee (clankerFee)
-    const feePct = options.feePercent !== undefined ? options.feePercent : (wConfig.feePercent !== undefined ? wConfig.feePercent : config.permanentFeePercent);
+    // Fee calculation: fee% means fee bps Buy Fee (pairedFee) and fee bps Sell Fee (clankerFee)
+    const feePct = options.feePercent !== undefined ? options.feePercent : (wConfig.feePercent !== undefined ? wConfig.feePercent : storage.getFeePercent());
     const feeBps = Math.round(feePct * 100);
 
     // Sniper tax decay: max 120s

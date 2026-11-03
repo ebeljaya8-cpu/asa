@@ -305,6 +305,28 @@ export class Storage {
     this.saveState(state);
     return target;
   }
+
+  getFeePercent() {
+    const state = this.getState();
+    return state.feePercent !== undefined ? state.feePercent : config.permanentFeePercent;
+  }
+
+  setFeePercent(pct) {
+    const num = Number(pct);
+    const validFees = [3, 10, 20];
+    const target = validFees.includes(num) ? num : (num >= 0 && num <= 20 ? num : 3);
+    const state = this.getState();
+    state.feePercent = target;
+    if (state.wallets) {
+      for (const id of [1, 2, 3]) {
+        if (state.wallets[id]) {
+          state.wallets[id].feePercent = target;
+        }
+      }
+    }
+    this.saveState(state);
+    return target;
+  }
 }
 
 export const storage = new Storage();
