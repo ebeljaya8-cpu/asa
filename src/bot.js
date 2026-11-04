@@ -91,7 +91,7 @@ export class TelegramBotApp {
 • <code>/deploy &lt;Nama&gt; &lt;Ticker&gt; [ImageUrl]</code> - Deploy manual via Wallet 1
 • <code>/deploy1</code>, <code>/deploy2</code>, <code>/deploy3</code> - Deploy manual via wallet tertentu
 • <code>/status</code> - Cek saldo ETH 3 wallet & estimasi gas Base
-• <code>/fee [3|10|20]</code> - Atur fee buy & sell token (3%, 10%, 20%)
+• <code>/fee [3|5|10]</code> - Atur fee buy & sell token (3%, 5%, 10% Max)
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -255,18 +255,18 @@ export class TelegramBotApp {
       await this.sendXRadarMenu(ctx);
     });
 
-    // /fee [3|10|20] - Mengatur fee buy & sell token
+    // /fee [3|5|10] - Mengatur fee buy & sell token (Max on-chain 10%)
     bot.command('fee', async (ctx) => {
       const arg = (ctx.message.text || '').split(' ')[1];
       if (arg) {
         const val = parseInt(arg, 10);
-        if ([3, 10, 20].includes(val)) {
+        if ([3, 5, 10].includes(val) || (val >= 1 && val <= 10)) {
           const saved = storage.setFeePercent(val);
           return ctx.replyWithHTML(
             `✅ <b>Fee Buy & Sell berhasil diubah ke ${saved}%!</b>\n\n` +
             `• Buy Fee: <code>${saved}%</code>\n` +
             `• Sell Fee: <code>${saved}%</code>\n\n` +
-            `<i>Berlaku untuk semua wallet (W1, W2, W3).</i>`,
+            `<i>Berlaku untuk semua wallet (W1, W2, W3). (Batas maksimum on-chain Clanker v4 adalah 10%).</i>`,
             Markup.inlineKeyboard([
               [Markup.button.callback('💸 Menu Fee', 'cmd_fee_menu')],
               [Markup.button.callback('⬅️ Dashboard', 'cmd_start_menu')]
@@ -274,7 +274,10 @@ export class TelegramBotApp {
           );
         } else {
           return ctx.replyWithHTML(
-            `⚠️ <b>Pilihan fee tidak valid: "${escapeHtml(arg)}"</b>\nPilihan yang tersedia: <code>3</code>, <code>10</code>, atau <code>20</code>%.\nContoh: <code>/fee 20</code>`
+            `⚠️ <b>Pilihan fee tidak valid: "${escapeHtml(arg)}"</b>\n` +
+            `Smart contract Clanker v4 di Base membatasi fee maksimal 10% (1000 bps).\n` +
+            `Pilihan yang tersedia: <code>3</code>, <code>5</code>, atau <code>10</code>%.\n` +
+            `Contoh: <code>/fee 10</code>`
           );
         }
       }
@@ -946,17 +949,17 @@ ${airdropDetails}
 
 Pilih fee transaksi yang akan diterapkan pada setiap token baru yang dideploy:
 
-• <b>3% (Rekomendasi Volume)</b>: Biaya rendah, menarik lebih banyak trader & volume transaksi.
-• <b>10% (Agresif / Seimbang)</b>: Menyeimbangkan antara volume transaksi dan pendapatan fee creator.
-• <b>20% (Maksimum Clanker v4)</b>: Batas fee tertinggi yang didukung oleh smart contract Clanker v4. Memaksimalkan perolehan fee bagi creator dari setiap buy dan sell.
+• <b>3% (Volume Tinggi)</b>: Biaya rendah, menarik volume trading paling tinggi dan ramah trader.
+• <b>5% (Moderat / Seimbang)</b>: Keseimbangan optimal antara likuiditas dan penerimaan fee creator.
+• <b>10% (Maksimum On-Chain Clanker v4)</b>: Batas tertinggi mutlak yang diizinkan oleh smart contract Clanker v4 di Base Network (1000 bps). Memaksimalkan perolehan fee bagi creator dari setiap buy dan sell.
 
-<i>💡 Pengaturan ini berlaku untuk semua wallet (W1 Utama, W2, W3) baik saat auto-deploy maupun manual deploy.</i>`;
+<i>⚠️ Catatan: Smart contract Clanker v4 di Base me-revert transaksi jika fee di atas 10%. Pilihan 10% adalah fee legal tertinggi yang diizinkan on-chain.</i>`;
 
     await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
       [
         Markup.button.callback(`💰 3% Fee${check(3)}`, 'set_fee_3'),
-        Markup.button.callback(`💰 10% Fee${check(10)}`, 'set_fee_10'),
-        Markup.button.callback(`💰 20% Fee${check(20)}`, 'set_fee_20')
+        Markup.button.callback(`💰 5% Fee${check(5)}`, 'set_fee_5'),
+        Markup.button.callback(`💰 10% Fee (Max)${check(10)}`, 'set_fee_10')
       ],
       [
         Markup.button.callback('⚙️ Kembali ke Pengaturan', 'cmd_settings'),

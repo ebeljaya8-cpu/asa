@@ -313,8 +313,9 @@ export class Storage {
 
   setFeePercent(pct) {
     const num = Number(pct);
-    const validFees = [3, 10, 20];
-    const target = validFees.includes(num) ? num : (num >= 0 && num <= 20 ? num : 3);
+    // Clanker v4 feeStaticHook contract enforces strict hard limit: max 10% (1000 bps)
+    const validFees = [3, 5, 10];
+    const target = validFees.includes(num) ? num : (num >= 0 && num <= 10 ? num : 10);
     const state = this.getState();
     state.feePercent = target;
     if (state.wallets) {

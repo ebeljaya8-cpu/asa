@@ -258,7 +258,9 @@ export class ClankerService {
     const description = this.generateProDescription(name, symbol, customDescription);
     
     // Fee calculation: fee% means fee bps Buy Fee (pairedFee) and fee bps Sell Fee (clankerFee)
-    const feePct = options.feePercent !== undefined ? options.feePercent : (wConfig.feePercent !== undefined ? wConfig.feePercent : storage.getFeePercent());
+    // Note: Clanker v4 feeStaticHook contract on Base strictly enforces max 10% (1000 bps)
+    const rawFeePct = options.feePercent !== undefined ? options.feePercent : (wConfig.feePercent !== undefined ? wConfig.feePercent : storage.getFeePercent());
+    const feePct = Math.min(10, Math.max(0, rawFeePct));
     const feeBps = Math.round(feePct * 100);
 
     // Sniper tax decay: max 120s
