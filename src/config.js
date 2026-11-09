@@ -78,5 +78,16 @@ export const config = {
 
   // Paths
   dataFile: path.join(__dirname, '..', 'data', 'deployed_tokens.json'),
-  stateFile: path.join(__dirname, '..', 'data', 'bot_state.json')
+  dataFileElysium: path.join(__dirname, '..', 'data', 'elysium_deployed_tokens.json'),
+  stateFile: path.join(__dirname, '..', 'data', 'bot_state.json'),
+
+  // Elysium Network Settings
+  elysiumRpcUrl: process.env.ELYSIUM_RPC_URL || 'https://rpc.elysium.kinetiq.xyz',
+  elysiumChainId: parseInt(process.env.ELYSIUM_CHAIN_ID || '99901', 10),
+  elysiumRouter: process.env.ELYSIUM_ROUTER || process.env.UNISWAP_V2_ROUTER || '0x3320b5685c1c4a0d2a5b0ca30dcee095142bf076',
+  elysiumExplorer: process.env.ELYSIUM_EXPLORER || 'https://elyscan.live',
+  elysiumPrivateKey: process.env.ELYSIUM_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.PRIVATE_KEY_1 || process.env.PRIVATE_KEY || '',
+  elysiumFeeWallet: process.env.ELYSIUM_FEE_WALLET || '',
+  elysiumDefaultLpHype: parseFloat(process.env.ELYSIUM_DEFAULT_LP_HYPE || '0.01'),
+  elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000' // 100B
 };

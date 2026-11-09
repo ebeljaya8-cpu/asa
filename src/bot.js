@@ -1,4 +1,5 @@
 import { Telegraf, Markup } from 'telegraf';
+import { ethers } from 'ethers';
 import { config, getAirdropEntries } from './config.js';
 import { storage } from './storage.js';
 import { geckoService } from './geckoService.js';
@@ -7,6 +8,7 @@ import { clankerService } from './clankerService.js';
 import { vestingMonitor } from './vestingMonitor.js';
 import { aiEngine } from './aiEngine.js';
 import { xRadarService } from './xRadarService.js';
+import { elysiumService } from './elysium/elysiumService.js';
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -92,13 +94,16 @@ export class TelegramBotApp {
 • <code>/deploy1</code>, <code>/deploy2</code>, <code>/deploy3</code> - Deploy manual via wallet tertentu
 • <code>/status</code> - Cek saldo ETH 3 wallet & estimasi gas Base
 • <code>/fee [3|5|10]</code> - Atur fee buy & sell token (3%, 5%, 10% Max)
+• <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
+• <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [HypeLP] [Fee%]</code> - Deploy token langsung ke Elysium Mainnet (+ Pool Uniswap V2 & Verified)
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>Fitur Unggulan Baru:</b>
-1. <b>Multi-Wallet Simultan:</b> Menjalankan 3 wallet secara bersamaan di Base Network, masing-masing mendeploy token berbeda tanpa duplikasi!
-2. <b>Radar Hype Terlengkap:</b> Memantau OKX Web3 Hot Tokens & Social Hype, Clanker.world, DexScreener, GeckoTerminal, dan Pump.fun!
-3. <b>Kontrol Terpisah Telegram:</b> Atur saldo, private key, dan auto-deploy masing-masing wallet secara mandiri lewat dashboard!`;
+1. <b>🪐 Elysium Mainnet Launchpad:</b> Deploy token ERC-20 mandiri ke Elysium Mainnet (Chain 99901, gas HYPE), otomatis set up Uniswap V2 pool, proteksi sniper 80% buy tax 30 menit, dan 100% verifikasi otomatis di Elyscan!
+2. <b>Multi-Wallet Simultan:</b> Menjalankan 3 wallet secara bersamaan di Base Network, masing-masing mendeploy token berbeda tanpa duplikasi!
+3. <b>Radar Hype Terlengkap:</b> Memantau OKX Web3 Hot Tokens & Social Hype, Elysium DEX, Clanker.world, DexScreener, GeckoTerminal, dan Pump.fun!
+4. <b>Kontrol Terpisah Telegram:</b> Atur saldo, private key, dan auto-deploy masing-masing wallet secara mandiri lewat dashboard!`;
 
       await ctx.replyWithHTML(helpMsg, Markup.inlineKeyboard([
         [Markup.button.callback('👛 Kelola 3 Wallet', 'cmd_wallets_menu')],
@@ -389,6 +394,41 @@ export class TelegramBotApp {
       await this.sendManualMultiWalletDeploySummary(ctx, targetToken, batchResults);
     });
 
+    // /elysium and /elys command
+    bot.command(['elysium', 'elys'], async (ctx) => {
+      await this.sendElysiumMenu(ctx);
+    });
+
+    // /deployelysium, /deployelys, /elysiumdeploy command
+    bot.command(['deployelysium', 'deployelys', 'elysiumdeploy'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendElysiumDeployMenu(ctx);
+      }
+
+      if (parts.length < 2) {
+        return ctx.replyWithHTML(
+          '⚠️ <b>Format salah!</b>\n\n' +
+          'Gunakan: <code>/deployelysium &lt;NamaToken&gt; &lt;Ticker&gt; [HypeLP] [Fee%]</code>\n' +
+          '<i>Contoh:</i> <code>/deployelysium PepeElysium PEPE 0.01 5</code>\n\n' +
+          'Atau ketik <code>/deployelysium</code> saja untuk membuka panduan & menu preset interaktif.'
+        );
+      }
+
+      const name = parts[0];
+      const symbol = parts[1].toUpperCase();
+      const hypeLp = parts[2] ? parts[2] : '0.01';
+      const fee = parts[3] ? Number(parts[3]) : 5;
+
+      await this.executeDeployElysium(ctx, {
+        name,
+        symbol,
+        hypeLiquidity: hypeLp,
+        buyFee: fee,
+        sellFee: fee
+      });
+    });
+
     // Action Handlers
     bot.action('cmd_start_menu', async (ctx) => {
       await ctx.answerCbQuery();
@@ -676,6 +716,74 @@ export class TelegramBotApp {
       await ctx.reply('Ketik /help untuk membaca panduan lengkap perintah.');
     });
 
+    // Elysium Actions
+    bot.action('cmd_elysium_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendElysiumMenu(ctx);
+    });
+
+    bot.action('cmd_elysium_deploy_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendElysiumDeployMenu(ctx);
+    });
+
+    bot.action('cmd_elysium_history', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendElysiumHistory(ctx);
+    });
+
+    bot.action('cmd_elysium_deploy_welysium', async (ctx) => {
+      await ctx.answerCbQuery('Memulai deployment Wrapped Elysium...').catch(() => {});
+      await this.executeDeployElysium(ctx, {
+        name: 'Wrapped Elysium',
+        symbol: 'WELYSIUM',
+        hypeLiquidity: '0.01',
+        isWelysium: true,
+        buyFee: 5,
+        sellFee: 5,
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: ethers.parseEther('6000000000'),
+        lockHours: 3
+      });
+    });
+
+    bot.action('cmd_elysium_quick_demo', async (ctx) => {
+      await ctx.answerCbQuery('Memulai Quick Deploy Token Demo...').catch(() => {});
+      const randomTag = Math.floor(100 + Math.random() * 900);
+      await this.executeDeployElysium(ctx, {
+        name: `Elysium Gem ${randomTag}`,
+        symbol: `GEM${randomTag}`,
+        hypeLiquidity: '0.004',
+        buyFee: 5,
+        sellFee: 5,
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
+    bot.action(/^d_elys_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy ke Elysium...').catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      let targetToken = this.trendingCache ? this.trendingCache[idx] : null;
+
+      if (!targetToken) {
+        return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending elysium lagi.');
+      }
+
+      await this.executeDeployElysium(ctx, {
+        name: targetToken.name,
+        symbol: targetToken.symbol,
+        hypeLiquidity: '0.005',
+        buyFee: 5,
+        sellFee: 5,
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
     // Dynamic Deploy Button Action with short callback data (safe < 64 bytes)
     // DEPLOYS ACROSS ALL WALLETS SIMULTANEOUSLY!
     bot.action(/^d_idx_(\d+)$/, async (ctx) => {
@@ -795,6 +903,9 @@ ${walletsOverview}
 👇 <i>Pilih menu di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🪐 Elysium Hub & Deploy (Chain 99901)', 'cmd_elysium_menu')
+      ],
       [
         Markup.button.callback('👛 Kelola 3 Wallet Terpisah', 'cmd_wallets_menu'),
         Markup.button.callback('🚀 Deploy 3 Wallet Sekaligus', 'cmd_deploy_all_wallets')
@@ -1405,9 +1516,16 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
 • Pool: <code>${escapeHtml(token.poolName)}</code>
 • Link Asal: <a href="${escapeHtml(token.sourceUrl)}">Info Pool / Token</a>`;
 
-        const buttons = [
-          [Markup.button.callback(`🚀 Deploy ke Base (Semua Wallet)`, `d_idx_${index}`)]
-        ];
+        const buttons = [];
+        if (category === 'elysium' || category === 'elys' || token.sourceNetwork?.toLowerCase() === 'elysium') {
+          buttons.push([Markup.button.callback(`🪐 Deploy ke Elysium Mainnet`, `d_elys_${index}`)]);
+          buttons.push([Markup.button.callback(`🚀 Deploy ke Base (Semua Wallet)`, `d_idx_${index}`)]);
+        } else {
+          buttons.push([
+            Markup.button.callback(`🚀 Deploy ke Base`, `d_idx_${index}`),
+            Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`)
+          ]);
+        }
 
         try {
           if (token.imageUrl && token.imageUrl.startsWith('http')) {
@@ -1954,6 +2072,209 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
     } catch (err) {
       console.error('Error in executeDeployAllWallets:', err);
       await ctx.replyWithHTML(`❌ <b>Gagal deploy simultan:</b> ${escapeHtml(err.message)}`);
+    }
+  }
+
+  async sendElysiumMenu(ctx) {
+    const info = await elysiumService.getDeployerInfo();
+    const deployedTokens = storage.getElysiumDeployedTokens();
+    const totalCount = deployedTokens.length;
+
+    const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
+    const balanceDisplay = info.balanceHype !== 'Error RPC' ? `<b>${parseFloat(info.balanceHype).toFixed(6)} HYPE</b>` : '⚠️ Gagal cek saldo';
+    const gasDisplay = `<code>${info.gasPriceGwei} Gwei</code>`;
+
+    const msg = 
+`🪐 <b>ELYSIUM LAUNCHPAD &amp; RADAR HUB (CHAIN ID 99901)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
+
+👛 <b>INFO DEPLOYER WALLET:</b>
+• Alamat: ${addrDisplay}
+• Saldo Gas (HYPE): ${balanceDisplay}
+• Estimasi Gas: ${gasDisplay}
+• Router Uniswap V2: <code>${info.routerAddress}</code>
+
+📊 <b>STATISTIK DEPLOYMENT:</b>
+• Total Token Dideploy: <b>${totalCount} token</b>
+• Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
+• Fee Default: <b>5% Buy / 5% Sell</b> ke Deployer Wallet
+• Verifikasi Explorer: <b>100% Otomatis di Elyscan (Standard-JSON)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Pilih aksi di bawah:</i>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🚀 Deploy Token Baru ke Elysium', 'cmd_elysium_deploy_menu'),
+        Markup.button.callback('🔥 Trending Elysium DEX', 'cmd_trending_elysium')
+      ],
+      [
+        Markup.button.callback('📜 Riwayat Deploy Elysium', 'cmd_elysium_history'),
+        Markup.button.callback('🔄 Refresh Status & Gas', 'cmd_elysium_menu')
+      ],
+      [
+        Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    await ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendElysiumDeployMenu(ctx) {
+    const info = await elysiumService.getDeployerInfo();
+    const balNum = parseFloat(info.balanceHype) || 0;
+    const safeLp = balNum >= 0.02 ? '0.01' : (balNum >= 0.008 ? '0.004' : '0.001');
+
+    const msg = 
+`🚀 <b>PANEL DEPLOY TOKEN KE ELYSIUM MAINNET</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Saldo Deployer Saat Ini: <b>${balNum.toFixed(6)} HYPE</b>
+• Rekomendasi LP HYPE: <b>${safeLp} HYPE</b>
+
+💡 <b>Cara Deploy:</b>
+1️⃣ <b>Gunakan Perintah Cepat di Chat:</b>
+<code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [HypeLP] [Fee%]</code>
+<i>Contoh:</i>
+• <code>/deployelysium PepeElysium PEPE ${safeLp} 5</code>
+• <code>/deployelysium CyberDog CDOG ${safeLp} 5</code>
+
+2️⃣ <b>Atau Pilih Preset di Bawah:</b>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('💎 Deploy Wrapped Elysium (WELYSIUM)', 'cmd_elysium_deploy_welysium')
+      ],
+      [
+        Markup.button.callback(`⚡ Quick Deploy Token Demo (${safeLp} HYPE LP)`, 'cmd_elysium_quick_demo')
+      ],
+      [
+        Markup.button.callback('🪐 Radar Trending Elysium (+ 1-Click Deploy)', 'cmd_trending_elysium')
+      ],
+      [
+        Markup.button.callback('⬅️ Kembali ke Menu Elysium', 'cmd_elysium_menu')
+      ]
+    ]);
+
+    await ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendElysiumHistory(ctx) {
+    const tokens = storage.getElysiumDeployedTokens();
+    if (!tokens || tokens.length === 0) {
+      return ctx.replyWithHTML(
+        '📜 <b>Belum ada riwayat token yang dideploy di Elysium.</b>\n\n' +
+        'Gunakan perintah <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt;</code> untuk mulai mendeploy.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 Deploy Token Sekarang', 'cmd_elysium_deploy_menu')],
+          [Markup.button.callback('⬅️ Menu Elysium', 'cmd_elysium_menu')]
+        ])
+      );
+    }
+
+    let text = `📜 <b>RIWAYAT DEPLOYMENT ELYSIUM MAINNET (${tokens.length} Token Terakhir):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    for (const [i, t] of tokens.slice(0, 5).entries()) {
+      const verifiedBadge = t.isVerified ? '🟢 Verified' : '🟡 Processed';
+      text += 
+`<b>#${i + 1} 🪙 ${escapeHtml(t.name)} ($${escapeHtml(t.symbol)})</b>
+• Kontrak: <code>${t.tokenAddress}</code> (${verifiedBadge})
+• Pool: <code>${t.poolAddress || 'N/A'}</code>
+• LP: <b>${t.hypeDeposited} HYPE</b> + <b>${t.tokenDeposited} Token</b>
+• Waktu: <i>${new Date(t.deployedAt).toLocaleString('id-ID')}</i>
+• Link: <a href="${t.explorerUrl}">Elyscan</a> | <a href="${t.dexscreenerUrl}">DexScreener</a>
+──────────────────────────\n`;
+    }
+
+    await ctx.replyWithHTML(text, Markup.inlineKeyboard([
+      [Markup.button.callback('🚀 Deploy Token Baru', 'cmd_elysium_deploy_menu')],
+      [Markup.button.callback('⬅️ Menu Elysium', 'cmd_elysium_menu')]
+    ]));
+  }
+
+  async executeDeployElysium(ctx, options = {}) {
+    const initialMsg = await ctx.replyWithHTML(
+      `🪐 <b>MEMULAI DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+      `• Likuiditas Pool: <b>${options.hypeLiquidity || '0.01'} HYPE</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
+      `• Fee: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>\n` +
+      `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n` +
+      `• Router: <code>0x3320b5685c1c4a0d2a5b0ca30dcee095142bf076</code>\n\n` +
+      `⏳ <i>Langkah 1/7: Memeriksa saldo HYPE &amp; parameter on-chain...</i>`
+    );
+
+    const progressUpdates = async (step, msg) => {
+      try {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          initialMsg.message_id,
+          null,
+          `🪐 <b>DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+          `• Status: <b>Langkah ${step}/7</b>\n\n` +
+          `⏳ <i>${escapeHtml(msg)}</i>`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+    };
+
+    try {
+      const result = await elysiumService.deployToken(options, progressUpdates);
+
+      const summaryMsg = 
+`🎉 <b>TOKEN BERHASIL DIDEPLOY &amp; LIVE DI ELYSIUM MAINNET!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Info Token:</b>
+• Nama: <b>${escapeHtml(result.token.name)}</b>
+• Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
+• Kontrak Token: <code>${result.token.address}</code>
+• Total Supply: <b>100.000.000.000 (100B)</b>
+• Status Verifikasi: <b>${result.token.isVerified ? '🟢 Verified di Elyscan' : '🟡 Sedang Diproses Elyscan'}</b>
+
+💧 <b>Uniswap V2 Pool &amp; Likuiditas:</b>
+• Alamat Pool (Pair): <code>${result.liquidity.poolAddress}</code>
+• Likuiditas Awal: <b>${result.liquidity.hypeDeposited}</b> + <b>${result.liquidity.tokensDeposited}</b>
+• Harga Awal: <code>${result.liquidity.initialPriceHype} HYPE</code>
+• Trading: <b>🟢 AKTIF (Bisa dibeli &amp; dijual langsung!)</b>
+
+🛡️ <b>Proteksi &amp; Pajak:</b>
+• Sniper Tax: <b>80% Buy Tax (30 Menit Pertama)</b>
+• Normal Tax: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>
+${result.lock.address ? `• Timelock: <code>${result.lock.address}</code> (${result.lock.amount} Token)\n` : ''}
+🔗 <b>Transaction Hashes:</b>
+• Deploy Token: <a href="${result.urls.tokenExplorer}">${result.token.deployTxHash.slice(0, 14)}...</a>
+• Add Liquidity: <code>${result.liquidity.addLiquidityTxHash.slice(0, 14)}...</code>
+• Enable Trading: <code>${result.liquidity.enableTradingTxHash.slice(0, 14)}...</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Klik tautan di bawah untuk melihat di Explorer &amp; Dex:</i>`;
+
+      const buttons = [
+        [
+          Markup.button.url('🔍 Lihat di Elyscan', result.urls.tokenExplorer),
+          Markup.button.url('📊 DexScreener', result.urls.dexscreener)
+        ],
+        [
+          Markup.button.url('💧 Lihat Pool di Explorer', result.urls.poolExplorer)
+        ],
+        [
+          Markup.button.callback('🪐 Dashboard Elysium', 'cmd_elysium_menu'),
+          Markup.button.callback('⬅️ Menu Utama', 'cmd_start_menu')
+        ]
+      ];
+
+      await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+    } catch (err) {
+      console.error('Error during Elysium deploy:', err);
+      await ctx.replyWithHTML(
+        `❌ <b>Deployment ke Elysium Gagal!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Error: <code>${escapeHtml(err.message)}</code>\n\n` +
+        `💡 <i>Pastikan saldo HYPE di wallet deployer mencukupi untuk LP + gas, dan coba lagi.</i>`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Coba Lagi', 'cmd_elysium_deploy_menu')],
+          [Markup.button.callback('🪐 Dashboard Elysium', 'cmd_elysium_menu')]
+        ])
+      );
     }
   }
 

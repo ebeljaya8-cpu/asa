@@ -2,6 +2,7 @@ import { config } from './src/config.js';
 import { botApp } from './src/bot.js';
 import { clankerService } from './src/clankerService.js';
 import { geckoService } from './src/geckoService.js';
+import { elysiumService } from './src/elysium/elysiumService.js';
 
 console.log('========================================================');
 console.log('🤖 CLANKER x GECKOTERMINAL AUTO DEPLOY TELEGRAM BOT');
@@ -21,6 +22,13 @@ async function main() {
   const wallet = await clankerService.getWalletInfo();
   console.log(`💳 Wallet Address: ${wallet.address}`);
   console.log(`💰 Base ETH Balance: ${wallet.balanceEth} ETH`);
+
+  const elysiumInfo = await elysiumService.getDeployerInfo();
+  console.log(`🪐 Elysium Mainnet (Chain ID 99901): ${elysiumInfo.configured ? 'READY ✅' : 'NOT CONFIGURED ⚠️'}`);
+  if (elysiumInfo.configured) {
+    console.log(`  • Deployer: ${elysiumInfo.address}`);
+    console.log(`  • Balance: ${elysiumInfo.balanceHype} HYPE`);
+  }
 
   if (!config.privateKey) {
     console.log('ℹ️ Catatan: PRIVATE_KEY belum diisi di .env. Bot akan berjalan dalam mode simulasi / dry-run.');

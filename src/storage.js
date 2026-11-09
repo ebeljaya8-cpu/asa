@@ -5,6 +5,7 @@ import { config } from './config.js';
 export class Storage {
   constructor() {
     this.dataFile = config.dataFile;
+    this.dataFileElysium = config.dataFileElysium;
     this.stateFile = config.stateFile;
     this.init();
   }
@@ -17,6 +18,10 @@ export class Storage {
 
     if (!fs.existsSync(this.dataFile)) {
       fs.writeFileSync(this.dataFile, JSON.stringify([], null, 2));
+    }
+
+    if (!fs.existsSync(this.dataFileElysium)) {
+      fs.writeFileSync(this.dataFileElysium, JSON.stringify([], null, 2));
     }
 
     if (!fs.existsSync(this.stateFile)) {
@@ -122,6 +127,58 @@ export class Storage {
   getDeployedTokensByWallet(walletIndex) {
     const tokens = this.getDeployedTokens();
     return tokens.filter(t => (t.walletIndex || 1) === Number(walletIndex));
+  }
+
+  getElysiumDeployedTokens() {
+    try {
+      if (!fs.existsSync(this.dataFileElysium)) return [];
+      const data = fs.readFileSync(this.dataFileElysium, 'utf-8');
+      return JSON.parse(data) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveElysiumDeployedToken(record) {
+    const tokens = this.getElysiumDeployedTokens();
+    const explorer = config.elysiumExplorer || 'https://elyscan.live';
+    const entry = {
+      id: record.id || Date.now().toString(),
+      name: record.name,
+      symbol: record.symbol,
+      totalSupply: record.totalSupply || '100000000000',
+      tokenAddress: record.tokenAddress,
+      poolAddress: record.poolAddress,
+      lockAddress: record.lockAddress || '',
+      deployerAddress: record.deployerAddress,
+      feeWallet: record.feeWallet || record.deployerAddress,
+      buyFee: record.buyFee || 5,
+      sellFee: record.sellFee || 5,
+      hypeDeposited: record.hypeDeposited || '0.01',
+      tokenDeposited: record.tokenDeposited || '20000000000',
+      initialPriceHype: record.initialPriceHype || 0,
+      deployTx: record.deployTx || '',
+      lockTx: record.lockTx || '',
+      addLiquidityTx: record.addLiquidityTx || '',
+      setPairTx: record.setPairTx || '',
+      enableTradingTx: record.enableTradingTx || '',
+      isVerified: Boolean(record.isVerified),
+      deployedAt: new Date().toISOString(),
+      network: 'Elysium Mainnet',
+      chainId: config.elysiumChainId || 99901,
+      explorerUrl: `${explorer}/address/${record.tokenAddress}`,
+      poolExplorerUrl: record.poolAddress ? `${explorer}/address/${record.poolAddress}` : '',
+      dexscreenerUrl: record.poolAddress ? `https://dexscreener.com/elysium/${record.poolAddress}` : `https://dexscreener.com/elysium/${record.tokenAddress}`
+    };
+
+    tokens.unshift(entry);
+    fs.writeFileSync(this.dataFileElysium, JSON.stringify(tokens.slice(0, 500), null, 2));
+
+    // Update state stats
+    const state = this.getState();
+    state.totalElysiumDeployedCount = (state.totalElysiumDeployedCount || 0) + 1;
+    this.saveState(state);
+    return entry;
   }
 
   getState() {
