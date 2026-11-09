@@ -83,7 +83,7 @@ export class TelegramBotApp {
 • <code>/setkey1 &lt;0x...&gt;</code> - Pasang/ganti private key Wallet 1 (Utama)
 • <code>/deployall</code> - Deploy 3 token berbeda secara simultan di 3 wallet
 • <code>/trending</code> - Radar token trending terlengkap (+ tombol deploy)
-  <i>Pilihan langsung: <code>/trending okx</code>, <code>/trending fresh</code>, <code>/trending clanker</code>, <code>/trending base</code>, <code>/trending all</code></i>
+  <i>Pilihan langsung: <code>/trending okx</code>, <code>/trending elysium</code>, <code>/trending fresh</code>, <code>/trending clanker</code>, <code>/trending base</code>, <code>/trending all</code></i>
 • <code>/autodeploy on</code> - Aktifkan auto-deploy simultan 3 wallet
 • <code>/autodeploy off</code> - Matikan auto-deploy
 • <code>/interval [15|30|60|120]</code> - Atur frekuensi auto-deploy (15m, 30m, 1j, 2j)
@@ -166,6 +166,9 @@ export class TelegramBotApp {
         }
         if (['arc'].includes(arg)) {
           return this.sendTrendingList(ctx, 'arc');
+        }
+        if (['elysium', 'elys'].includes(arg)) {
+          return this.sendTrendingList(ctx, 'elysium');
         }
         if (['fresh', 'new', 'exposure', 'freshexp'].includes(arg)) {
           return this.sendTrendingList(ctx, 'fresh');
@@ -496,6 +499,11 @@ export class TelegramBotApp {
     bot.action('cmd_trending_arc', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendTrendingList(ctx, 'arc');
+    });
+
+    bot.action(['cmd_trending_elysium', 'cmd_trending_elys'], async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTrendingList(ctx, 'elysium');
     });
 
     bot.action('cmd_trending_clanker', async (ctx) => {
@@ -1228,21 +1236,22 @@ Ditemukan <b>${activeTokens.length} Token</b> dengan aktivitas likuiditas/volume
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideploy ke <b>Base via Clanker</b>:
 
-🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (OKX, Clanker, Koin Baru Fresh, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
+🌐 <b>1. Semua Trending:</b> Agregasi cerdas multi-platform (OKX, Clanker, Koin Baru Fresh, Elysium, Robinhood, ARC, DexScreener, Solana, Base, ETH, BSC)
 🔥 <b>2. OKX Hot Tokens:</b> Token paling hot di OKX Web3 (Trending by Token Score & X Social Hype + Top Gainers)
 ⭐ <b>3. Koin Baru Exposure Tinggi:</b> Token baru rilis (&lt; 72 jam) dengan volume &amp; transaksi masif dari jaringan manapun
-🏹 <b>4. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
-⚡ <b>5. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
-🤖 <b>6. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j & transaksi on-chain di Clanker.world
-🦅 <b>7. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
-🔵 <b>8. Base Network:</b> GeckoTerminal Base trending pools
-💊 <b>9. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
-🦎 <b>10. CoinGecko Global:</b> Trending search & coins global (Robinhood/Top Gainers)
-🚀 <b>11. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
-🆕 <b>12. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
-💎 <b>13. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
-🟡 <b>14. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
-🦄 <b>15. Multi-DEX (Uniswap/Raydium):</b> Top DEX trending multi-platform
+🪐 <b>4. Elysium Network:</b> Token viral & volume masif di jaringan Elysium (EVM L1 / Boxa DEX & Uniswap v4)
+🏹 <b>5. Robinhood Network:</b> Token trending di jaringan L2 Robinhood (Arbitrum Orbit / Uniswap v3)
+⚡ <b>6. ARC Network:</b> Token trending di ekosistem ARC (Circle EVM Layer-1)
+🤖 <b>7. Clanker.world Top Trending Now:</b> Token teratas berdasarkan volume 24j & transaksi on-chain di Clanker.world
+🦅 <b>8. DexScreener Trending All-Chain:</b> Token viral multi-chain real-time (Solana, Base, Ethereum, BSC, Arbitrum, dll.)
+🔵 <b>9. Base Network:</b> GeckoTerminal Base trending pools
+💊 <b>10. Pump.fun (Solana):</b> Meme coins viral di Pump.fun / Solana
+🦎 <b>11. CoinGecko Global:</b> Trending search & coins global (Robinhood/Top Gainers)
+🚀 <b>12. FOMO Top Boosts:</b> DexScreener boosted tokens lintas chain
+🆕 <b>13. DexScreener New Pairs:</b> Pasangan baru Base dengan profil lengkap (profile=1)
+💎 <b>14. Ethereum (ETH):</b> GeckoTerminal Ethereum trending pools
+🟡 <b>15. BSC (Binance):</b> GeckoTerminal Binance Smart Chain trending
+🦄 <b>16. Multi-DEX (Uniswap/Raydium):</b> Top DEX trending multi-platform
 
 👇 <i>Klik kategori pilihan Anda:</i>`;
 
@@ -1252,7 +1261,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         Markup.button.callback('🔥 OKX Hot Tokens', 'cmd_trending_okx')
       ],
       [
-        Markup.button.callback('🔥 Koin Baru Exposure Tinggi', 'cmd_trending_fresh')
+        Markup.button.callback('🔥 Koin Baru Exposure Tinggi', 'cmd_trending_fresh'),
+        Markup.button.callback('🪐 Elysium Network', 'cmd_trending_elysium')
       ],
       [
         Markup.button.callback('🏹 Robinhood Network', 'cmd_trending_rh'),
@@ -1299,6 +1309,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
       okxhot: '🔥 OKX Hot Tokens (Web3 & Social Hype)',
       fresh: '🔥 Koin Baru Exposure Tinggi (All-Chain Fresh & High Volume)',
       freshexp: '🔥 Koin Baru Exposure Tinggi (All-Chain Fresh & High Volume)',
+      elysium: '🪐 DexScreener & GeckoTerminal (Elysium Network)',
+      elys: '🪐 DexScreener & GeckoTerminal (Elysium Network)',
       robinhood: '🏹 GeckoTerminal & DexScreener (Robinhood L2)',
       rh: '🏹 GeckoTerminal & DexScreener (Robinhood L2)',
       arc: '⚡ GeckoTerminal & DexScreener (ARC Network)',
@@ -1321,6 +1333,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
       let tokens = [];
       if (category === 'okx' || category === 'okxhot') {
         tokens = await trendingService.getOkxHotTokens();
+      } else if (category === 'elysium' || category === 'elys') {
+        tokens = await trendingService.getElysiumTrending();
       } else if (category === 'robinhood' || category === 'rh') {
         tokens = await trendingService.getRobinhoodTrending();
       } else if (category === 'arc') {
@@ -1415,7 +1429,7 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         }
       }
 
-      const refreshKey = category === 'coingecko' ? 'cg' : (category === 'robinhood' ? 'rh' : (category === 'freshexp' ? 'fresh' : category));
+      const refreshKey = category === 'coingecko' ? 'cg' : (category === 'robinhood' ? 'rh' : (category === 'freshexp' ? 'fresh' : (category === 'elysium' || category === 'elys' ? 'elysium' : category)));
 
       await ctx.replyWithHTML(
         '👇 <i>Pilih token di atas untuk deploy ke Base, atau ganti kategori:</i>',
@@ -1560,7 +1574,7 @@ ${recommendation ? `\n📌 <b>Saran:</b> <i>${escapeHtml(recommendation)}</i>` :
     const minutes = overrideMinutes || storage.getIntervalMinutes();
     const intervalMs = Math.max(minutes * 60 * 1000, 60000);
     const label = minutes >= 60 ? `${minutes / 60} Jam` : `${minutes} Menit`;
-    console.log(`[AutoDeploy Poller] Started. Checking multi-chain trending (Clanker, Fresh High-Exposure, Robinhood, ARC, Base, Solana, Pump.fun, CoinGecko, FOMO) every ${label} (${intervalMs / 1000}s)...`);
+    console.log(`[AutoDeploy Poller] Started. Checking multi-chain trending (Clanker, Fresh High-Exposure, Elysium, Robinhood, ARC, Base, Solana, Pump.fun, CoinGecko, FOMO) every ${label} (${intervalMs / 1000}s)...`);
 
     this.pollingInterval = setInterval(async () => {
       try {

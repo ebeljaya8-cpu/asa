@@ -14,9 +14,9 @@ export class AIEngine {
       state.aiMemory = {
         marketAnalysisHistory: [],
         successfulPatterns: {
-          topKeywords: ['AI', 'BASE', 'FINANCE', 'DOGE', 'CAT', 'PUMP', 'PEPE', 'DEFI'],
+          topKeywords: ['AI', 'BASE', 'ELYSIUM', 'FINANCE', 'DOGE', 'CAT', 'PUMP', 'PEPE', 'DEFI'],
           avgVolumeThreshold: 5000,
-          preferredCategories: ['pump', 'base', 'coingecko']
+          preferredCategories: ['pump', 'base', 'elysium', 'coingecko']
         },
         learnedDeployCount: 0,
         highFomoCount: 0,

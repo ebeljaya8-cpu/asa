@@ -778,6 +778,123 @@ export class TrendingService {
   }
 
   /**
+   * 4.10.1. Fetch Elysium Network Trending (DexScreener + GeckoTerminal Elysium Blockchain)
+   * Mengambil token viral di ekosistem Elysium (Boxa DEX, Uniswap v4 & EVM L1)
+   */
+  async getElysiumTrending() {
+    const cacheKey = 'gt_elysium_trending';
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.cacheExpiry) {
+      return cached.data;
+    }
+
+    try {
+      const results = [];
+      const seen = new Set();
+
+      // 1. GeckoTerminal Trending Pools on Elysium network (if supported)
+      const gtPools = await this.getGeckoTerminalTrending('elysium');
+      for (const t of gtPools) {
+        if (!seen.has(t.symbol)) {
+          seen.add(t.symbol);
+          results.push({
+            ...t,
+            sourceNetwork: 'ELYSIUM',
+            sourceType: 'GeckoTerminal (Elysium Network)'
+          });
+        }
+      }
+
+      // 2. DexScreener Search queries (elysium & boxa native DEX)
+      const queries = ['elysium', 'boxa'];
+      for (const q of queries) {
+        const dxUrl = `${this.dexScreenerBase}/latest/dex/search?q=${encodeURIComponent(q)}`;
+        const dxJson = await this.safeFetchJson(dxUrl);
+        if (dxJson && dxJson.pairs) {
+          for (const pair of dxJson.pairs) {
+            if (pair.chainId !== 'elysium') continue;
+            const baseToken = pair.baseToken;
+            if (!baseToken || !baseToken.symbol) continue;
+            const symbol = baseToken.symbol.trim().toUpperCase();
+            if (seen.has(symbol)) continue;
+            seen.add(symbol);
+
+            const volume24h = parseFloat(pair.volume?.h24 || '0');
+            const dexId = (pair.dexId || 'DEX').toUpperCase();
+            results.push({
+              id: `elysium_${pair.pairAddress?.substring(0, 10) || symbol.toLowerCase()}`,
+              name: baseToken.name || symbol,
+              symbol,
+              imageUrl: pair.info?.imageUrl || pair.info?.header || 'https://assets.coingecko.com/coins/images/placeholder.png',
+              priceUsd: pair.priceUsd ? String(pair.priceUsd) : '0',
+              fdvUsd: pair.fdv ? String(pair.fdv) : '0',
+              volume24h: volume24h.toFixed(2),
+              sourceNetwork: 'ELYSIUM',
+              sourceType: `DexScreener (${dexId} / Elysium)`,
+              poolAddress: pair.pairAddress,
+              poolName: `${symbol} on ${dexId} (Elysium)`,
+              sourceUrl: pair.url || `https://dexscreener.com/elysium/${pair.pairAddress}`
+            });
+          }
+        }
+      }
+
+      // 3. DexScreener Boosts & Profiles filtering chainId === 'elysium'
+      try {
+        const [boosts, profiles] = await Promise.all([
+          this.safeFetchJson(`${this.dexScreenerBase}/token-boosts/top/v1`),
+          this.safeFetchJson(`${this.dexScreenerBase}/token-profiles/latest/v1`)
+        ]);
+        const addrs = new Set();
+        (boosts || []).filter(b => b.chainId === 'elysium').forEach(b => b.tokenAddress && addrs.add(b.tokenAddress));
+        (profiles || []).filter(p => p.chainId === 'elysium').forEach(p => p.tokenAddress && addrs.add(p.tokenAddress));
+
+        if (addrs.size > 0) {
+          const pairsData = await this.safeFetchJson(`${this.dexScreenerBase}/latest/dex/tokens/${Array.from(addrs).slice(0, 30).join(',')}`);
+          if (pairsData && pairsData.pairs) {
+            for (const pair of pairsData.pairs) {
+              if (pair.chainId !== 'elysium') continue;
+              const baseToken = pair.baseToken;
+              if (!baseToken || !baseToken.symbol) continue;
+              const symbol = baseToken.symbol.trim().toUpperCase();
+              if (seen.has(symbol)) continue;
+              seen.add(symbol);
+
+              const volume24h = parseFloat(pair.volume?.h24 || '0');
+              const dexId = (pair.dexId || 'DEX').toUpperCase();
+              results.push({
+                id: `elysium_${pair.pairAddress?.substring(0, 10) || symbol.toLowerCase()}`,
+                name: baseToken.name || symbol,
+                symbol,
+                imageUrl: pair.info?.imageUrl || pair.info?.header || 'https://assets.coingecko.com/coins/images/placeholder.png',
+                priceUsd: pair.priceUsd ? String(pair.priceUsd) : '0',
+                fdvUsd: pair.fdv ? String(pair.fdv) : '0',
+                volume24h: volume24h.toFixed(2),
+                sourceNetwork: 'ELYSIUM',
+                sourceType: `DexScreener (${dexId} / Elysium)`,
+                poolAddress: pair.pairAddress,
+                poolName: `${symbol} on ${dexId} (Elysium)`,
+                sourceUrl: pair.url || `https://dexscreener.com/elysium/${pair.pairAddress}`
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback gracefully
+      }
+
+      // Sort by 24h volume descending
+      results.sort((a, b) => parseFloat(b.volume24h || 0) - parseFloat(a.volume24h || 0));
+
+      this.cache.set(cacheKey, { data: results, time: Date.now() });
+      return results;
+    } catch (e) {
+      console.warn('Error fetching Elysium trending:', e.message);
+      return [];
+    }
+  }
+
+  /**
    * 4.11. Fetch Kategori Coin Baru dengan Exposure Tinggi (All-Chain Fresh & High-Exposure)
    * Mengumpulkan token yang berumur muda (< 72 jam) dengan volume, transaksi, dan exposure/boost tertinggi
    * dari SEMUA jaringan (Solana, Base, Ethereum, BSC, Robinhood, ARC, dll.)
@@ -895,13 +1012,14 @@ export class TrendingService {
 
   /**
    * 5. Get Combined All-in-One Multi-Chain & Multi-Platform Trending
-   * Aggregates OKX Hot Tokens, Clanker.world, Fresh High-Exposure, Robinhood, ARC, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
+   * Aggregates OKX Hot Tokens, Clanker.world, Fresh High-Exposure, Elysium, Robinhood, ARC, DexScreener All-Chain, Base, Solana, CoinGecko, Pump.fun, FOMO Boosts, DexScreener New Pairs, Ethereum, BSC, and Multi-DEX
    */
   async getAllTrendingTokens() {
     const [
       okxHot,
       clankerWorld,
       freshHighExposure,
+      elysium,
       robinhood,
       arc,
       dxAllChain,
@@ -919,6 +1037,7 @@ export class TrendingService {
       this.getOkxHotTokens(),
       this.getClankerWorldTrending(),
       this.getFreshHighExposureTrending(),
+      this.getElysiumTrending(),
       this.getRobinhoodTrending(),
       this.getArcTrending(),
       this.getDexScreenerAllChainTrending(),
@@ -942,6 +1061,7 @@ export class TrendingService {
       okxHot.length,
       clankerWorld.length,
       freshHighExposure.length,
+      elysium.length,
       robinhood.length,
       arc.length,
       dxAllChain.length,
@@ -962,6 +1082,7 @@ export class TrendingService {
         okxHot[i],             // OKX Web3 Hot Tokens & Social Hype
         clankerWorld[i],       // Official Clanker.world trending now
         freshHighExposure[i],  // Koin baru umur muda dengan exposure tinggi lintas chain
+        elysium[i],            // Elysium network trending (Boxa & Uniswap v4)
         robinhood[i],          // Robinhood L2 trending
         arc[i],                // ARC network trending
         dxAllChain[i],         // DexScreener All-Chain trending (Solana, Base, ETH, BSC)

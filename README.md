@@ -6,8 +6,8 @@ Bot Telegram cerdas untuk mendeteksi token trending secara otomatis dari **Gecko
 
 ## 🌟 Fitur Utama
 
-1. **Scraping Real-Time GeckoTerminal**:
-   - Otomatis mengambil token trending di Base network.
+1. **Scraping Real-Time Multi-Chain & Multi-Platform**:
+   - Otomatis mengambil token trending di berbagai jaringan teratas: **Elysium Network**, Base, Solana, Ethereum, BSC, Robinhood, ARC, OKX Web3, dan Clanker.world.
    - Mengambil nama token, ticker/symbol, dan logo resmi resolusi tinggi.
    - Menampilkan harga terkini, volume 24 jam, dan FDV.
 
