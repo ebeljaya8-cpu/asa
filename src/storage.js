@@ -154,10 +154,15 @@ export class Storage {
       feeWallet: record.feeWallet || record.deployerAddress,
       buyFee: record.buyFee || 5,
       sellFee: record.sellFee || 5,
+      dexVersion: record.dexVersion || 'Uniswap V3',
+      pairToken: record.pairToken || 'HYPE',
+      quoteDeposited: record.quoteDeposited || record.hypeDeposited || '0.0001',
       hypeDeposited: record.hypeDeposited || '0.0001',
       devBuyHype: record.devBuyHype || '0.0001',
       tokenDeposited: record.tokenDeposited || '20000000000',
       initialPriceHype: record.initialPriceHype || 0,
+      positionTokenId: record.positionTokenId || null,
+      v3FeeTier: record.v3FeeTier || 10000,
       deployTx: record.deployTx || '',
       lockTx: record.lockTx || '',
       addLiquidityTx: record.addLiquidityTx || '',
@@ -412,6 +417,48 @@ export class Storage {
     const target = isNaN(num) || num < 0 ? 0 : num;
     const state = this.getState();
     state.elysiumDevBuyHype = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getElysiumDexVersion() {
+    const state = this.getState();
+    return state.elysiumDexVersion || config.elysiumDefaultDex || 'v3'; // 'v3' (default) or 'v2'
+  }
+
+  setElysiumDexVersion(version) {
+    const target = String(version).toLowerCase() === 'v2' ? 'v2' : 'v3';
+    const state = this.getState();
+    state.elysiumDexVersion = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getElysiumPairToken() {
+    const state = this.getState();
+    return state.elysiumPairToken || config.elysiumDefaultPair || 'HYPE'; // 'HYPE', 'ETH', 'USDC', 'WETH'
+  }
+
+  setElysiumPairToken(token) {
+    const upper = (token || 'HYPE').toUpperCase().trim();
+    const valid = ['HYPE', 'ETH', 'USDC', 'WETH'];
+    const target = valid.includes(upper) ? upper : 'HYPE';
+    const state = this.getState();
+    state.elysiumPairToken = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getElysiumV3FeeTier() {
+    const state = this.getState();
+    return state.elysiumV3FeeTier || 10000; // 10000 (1%) standard Elysium V3 meme fee
+  }
+
+  setElysiumV3FeeTier(fee) {
+    const valid = [100, 500, 3000, 10000];
+    const target = valid.includes(Number(fee)) ? Number(fee) : 10000;
+    const state = this.getState();
+    state.elysiumV3FeeTier = target;
     this.saveState(state);
     return target;
   }

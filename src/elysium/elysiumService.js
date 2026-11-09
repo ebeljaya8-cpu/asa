@@ -14,7 +14,37 @@ const elysiumTokenArtifact = JSON.parse(fs.readFileSync(path.join(contractsDir, 
 const wrappedElysiumArtifact = JSON.parse(fs.readFileSync(path.join(contractsDir, 'WrappedElysium.json'), 'utf8'));
 const teamTokenLockArtifact = JSON.parse(fs.readFileSync(path.join(contractsDir, 'TeamTokenLock.json'), 'utf8'));
 
-// Uniswap V2 Minimal ABIs
+// Uniswap V3 Verified ABIs
+const V3_FACTORY_ABI = [
+  'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
+  'function feeAmountTickSpacing(uint24 fee) external view returns (int24)'
+];
+
+const POSITION_MANAGER_ABI = [
+  'function createAndInitializePoolIfNecessary(address token0, address token1, uint24 fee, uint160 sqrtPriceX96) external payable returns (address pool)',
+  'function mint((address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline)) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
+  'function factory() external view returns (address)',
+  'function WETH9() external view returns (address)',
+  'event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)'
+];
+
+const SWAP_ROUTER_ABI = [
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+  'function factory() external view returns (address)',
+  'function WETH9() external view returns (address)'
+];
+
+const ERC20_ABI = [
+  'function balanceOf(address owner) external view returns (uint256)',
+  'function approve(address spender, uint256 value) external returns (bool)',
+  'function transfer(address to, uint256 value) external returns (bool)',
+  'function decimals() external view returns (uint8)',
+  'function symbol() external view returns (string)',
+  'function deposit() external payable',
+  'function withdraw(uint256 amount) external'
+];
+
+// Uniswap V2 ABIs (Fallback)
 const ROUTER_ABI = [
   'function factory() external pure returns (address)',
   'function WETH() external pure returns (address)',
@@ -28,13 +58,37 @@ const FACTORY_ABI = [
   'function createPair(address tokenA, address tokenB) external returns (address pair)'
 ];
 
+// Calculate sqrtPriceX96 using integer square root
+function encodePriceSqrt(amount1, amount0) {
+  const numerator = BigInt(amount1) * (2n ** 192n);
+  const ratio = numerator / BigInt(amount0);
+  let z = ratio;
+  let x = (z + 1n) / 2n;
+  let y = z;
+  while (x < y) {
+    y = x;
+    x = (x + (z / x)) / 2n;
+  }
+  return y;
+}
+
 export class ElysiumService {
   constructor() {
     this.rpcUrl = config.elysiumRpcUrl || 'https://rpc.elysium.kinetiq.xyz';
     this.chainId = config.elysiumChainId || 99901;
-    this.routerAddress = config.elysiumRouter || '0x3320b5685c1c4a0d2a5b0ca30dcee095142bf076';
     this.explorerUrl = config.elysiumExplorer || 'https://elyscan.live';
     this.provider = new ethers.JsonRpcProvider(this.rpcUrl, this.chainId, { staticNetwork: true });
+
+    // Uniswap V3 Verified Contracts
+    this.v3Factory = config.elysiumV3Factory || '0x1707327F626496A7b5b3872e7E4d2879Df7d7a9f';
+    this.v3PositionManager = config.elysiumV3PositionManager || '0xF025e0Fe9E331A0eF05c2ad3C4E9C64b625cda6f';
+    this.v3SwapRouter = config.elysiumV3SwapRouter || '0x003aa18c6E682dB80Cf4aa17261CcbFfd28690CE';
+    this.v3Quoter = config.elysiumV3Quoter || '0x94a7d36e2AE728d6A2B2ee533b0a260385596D8b';
+    this.wethAddress = config.elysiumWeth || '0xbA876237B0F021A6c6D852d6c26E107997cC5E81'; // WHYPE / WETH9
+    this.usdcAddress = config.elysiumUsdc || '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65'; // USDC
+
+    // Uniswap V2 Router (Fallback)
+    this.routerAddress = config.elysiumRouter || '0x3320b5685c1c4a0d2a5b0ca30dcee095142bf076';
   }
 
   getDeployerWallet() {
@@ -47,24 +101,41 @@ export class ElysiumService {
 
   async getDeployerInfo() {
     const wallet = this.getDeployerWallet();
+    const dexVersion = storage.getElysiumDexVersion();
+    const pairToken = storage.getElysiumPairToken();
+    const v3FeeTier = storage.getElysiumV3FeeTier();
+
     if (!wallet) {
       return {
         configured: false,
         address: null,
         balanceHype: '0',
+        balanceWhype: '0',
+        balanceUsdc: '0',
         gasPriceGwei: '0',
         network: 'Elysium Mainnet',
         chainId: this.chainId,
         rpcUrl: this.rpcUrl,
         explorerUrl: this.explorerUrl,
+        dexVersion,
+        pairToken,
+        v3FeeTier,
+        v3Factory: this.v3Factory,
+        v3PositionManager: this.v3PositionManager,
+        v3SwapRouter: this.v3SwapRouter,
         routerAddress: this.routerAddress
       };
     }
 
     try {
-      const [balance, feeData] = await Promise.all([
+      const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, this.provider);
+      const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, this.provider);
+
+      const [balance, feeData, whypeBal, usdcBal] = await Promise.all([
         this.provider.getBalance(wallet.address),
-        this.provider.getFeeData()
+        this.provider.getFeeData(),
+        whypeContract.balanceOf(wallet.address).catch(() => 0n),
+        usdcContract.balanceOf(wallet.address).catch(() => 0n)
       ]);
 
       const gasPriceGwei = feeData.gasPrice ? ethers.formatUnits(feeData.gasPrice, 'gwei') : '0';
@@ -74,11 +145,19 @@ export class ElysiumService {
         address: wallet.address,
         balanceHype: ethers.formatEther(balance),
         balanceHypeRaw: balance,
+        balanceWhype: ethers.formatEther(whypeBal),
+        balanceUsdc: ethers.formatUnits(usdcBal, 6),
         gasPriceGwei,
         network: 'Elysium Mainnet',
         chainId: this.chainId,
         rpcUrl: this.rpcUrl,
         explorerUrl: this.explorerUrl,
+        dexVersion,
+        pairToken,
+        v3FeeTier,
+        v3Factory: this.v3Factory,
+        v3PositionManager: this.v3PositionManager,
+        v3SwapRouter: this.v3SwapRouter,
         routerAddress: this.routerAddress
       };
     } catch (err) {
@@ -86,12 +165,20 @@ export class ElysiumService {
         configured: true,
         address: wallet.address,
         balanceHype: 'Error RPC',
+        balanceWhype: '0',
+        balanceUsdc: '0',
         gasPriceGwei: '0',
         error: err.message,
         network: 'Elysium Mainnet',
         chainId: this.chainId,
         rpcUrl: this.rpcUrl,
         explorerUrl: this.explorerUrl,
+        dexVersion,
+        pairToken,
+        v3FeeTier,
+        v3Factory: this.v3Factory,
+        v3PositionManager: this.v3PositionManager,
+        v3SwapRouter: this.v3SwapRouter,
         routerAddress: this.routerAddress
       };
     }
@@ -167,8 +254,13 @@ export class ElysiumService {
       throw new Error('Private key deployer Elysium belum dikonfigurasi di .env (ELYSIUM_PRIVATE_KEY / PRIVATE_KEY)');
     }
 
-    notify(1, 'Memeriksa saldo HYPE dan kesiapan jaringan Elysium...');
+    notify(1, 'Memeriksa saldo HYPE, pair token, dan kesiapan jaringan Elysium...');
     const balance = await this.provider.getBalance(wallet.address);
+
+    const dexVersion = (options.dexVersion || storage.getElysiumDexVersion() || 'v3').toLowerCase();
+    const pairChoice = (options.pair || storage.getElysiumPairToken() || 'HYPE').toUpperCase().trim();
+    const feeTier = Number(options.feeTier || storage.getElysiumV3FeeTier() || 10000);
+
     const hypeLp = String(options.hypeLiquidity || storage.getElysiumLpHype() || config.elysiumDefaultLpHype || '0.0001');
     const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0.0001'));
     const hypeLpWei = ethers.parseEther(hypeLp);
@@ -180,6 +272,26 @@ export class ElysiumService {
       const curHype = ethers.formatEther(balance);
       const reqHype = ethers.formatEther(totalRequiredWei);
       throw new Error(`Saldo HYPE tidak mencukupi! Anda memiliki ${curHype} HYPE, dibutuhkan minimal ${reqHype} HYPE (LP ${hypeLp} HYPE + Dev Buy ${devBuyHype} HYPE + gas).`);
+    }
+
+    // Resolve Quote Token (HYPE, ETH, WETH, USDC)
+    let quoteAddress;
+    let quoteSymbol;
+    let quoteDecimals = 18;
+
+    if (pairChoice === 'USDC') {
+      quoteAddress = config.elysiumUsdc || this.usdcAddress;
+      quoteSymbol = 'USDC';
+      quoteDecimals = 6;
+    } else if (pairChoice === 'WETH') {
+      quoteAddress = config.elysiumWeth || this.wethAddress;
+      quoteSymbol = 'WETH';
+      quoteDecimals = 18;
+    } else {
+      // HYPE or ETH
+      quoteAddress = config.elysiumWeth || this.wethAddress;
+      quoteSymbol = pairChoice === 'ETH' ? 'ETH' : 'HYPE';
+      quoteDecimals = 18;
     }
 
     const name = (options.name || 'Elysium Token').trim();
@@ -277,35 +389,166 @@ export class ElysiumService {
       notify(4, `Lock berhasil! Tx: ${lockTransferTxHash}`);
     }
 
-    // Step 4: Add Liquidity
-    notify(5, `Menyetor likuiditas ke Uniswap V2 (${hypeLp} HYPE + ${ethers.formatUnits(tokenLp, 18)} ${symbol})...`);
-    const router = new ethers.Contract(this.routerAddress, ROUTER_ABI, wallet);
-    
-    // Approve Router
-    const approveTx = await tokenContract.approve(this.routerAddress, ethers.MaxUint256);
-    await approveTx.wait();
+    // Step 4: Add Liquidity (Uniswap V3 by default, Uniswap V2 fallback)
+    let poolAddress = '';
+    let addLiquidityTxHash = '';
+    let positionTokenId = null;
+    let quoteDepositedDisplay = '';
+    let initialPrice = 0;
 
-    const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 mins
-    const addLiqTx = await router.addLiquidityETH(
-      tokenAddress,
-      tokenLp,
-      0,
-      0,
-      wallet.address,
-      deadline,
-      { value: hypeLpWei }
-    );
-    await addLiqTx.wait();
-    const addLiquidityTxHash = addLiqTx.hash;
-    notify(5, `Likuiditas berhasil disetor! Tx: ${addLiquidityTxHash}`);
+    if (dexVersion === 'v3') {
+      notify(5, `Menyiapkan likuiditas Uniswap V3 (Pair: ${symbol}/${quoteSymbol}, Fee Tier: ${feeTier / 10000}%)...`);
+      
+      const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
+      const npm = new ethers.Contract(this.v3PositionManager, POSITION_MANAGER_ABI, wallet);
+      const factory = new ethers.Contract(this.v3Factory, V3_FACTORY_ABI, wallet);
+      const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
 
-    // Step 5: Get Pool & setPair
+      let quoteDepositWei;
+
+      if (quoteSymbol === 'USDC') {
+        const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
+        let curUsdc = await usdcContract.balanceOf(wallet.address);
+
+        // If deployer wallet doesn't have USDC, auto-swap hypeLp to USDC via Uniswap V3 WHYPE/USDC pool
+        if (curUsdc < 1000n) {
+          notify(5, `Menukar ${hypeLp} HYPE ke USDC via Uniswap V3 Router untuk pasangan pool...`);
+          const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
+          await wrapTx.wait();
+          const appWhypeTx = await whypeContract.approve(this.v3SwapRouter, hypeLpWei);
+          await appWhypeTx.wait();
+
+          const deadline = Math.floor(Date.now() / 1000) + 600;
+          const swapToUsdc = await swapRouter.exactInputSingle({
+            tokenIn: this.wethAddress,
+            tokenOut: this.usdcAddress,
+            fee: 10000,
+            recipient: wallet.address,
+            deadline,
+            amountIn: hypeLpWei,
+            amountOutMinimum: 0n,
+            sqrtPriceLimitX96: 0n
+          });
+          await swapToUsdc.wait();
+          curUsdc = await usdcContract.balanceOf(wallet.address);
+        }
+
+        quoteDepositWei = curUsdc;
+        quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 6)} USDC`;
+        
+        notify(5, `Approve USDC ke NonfungiblePositionManager...`);
+        const appUsdcTx = await usdcContract.approve(this.v3PositionManager, ethers.MaxUint256);
+        await appUsdcTx.wait();
+        initialPrice = Number(ethers.formatUnits(quoteDepositWei, 6)) / Number(ethers.formatUnits(tokenLp, 18));
+      } else {
+        // HYPE, ETH, or WETH (uses WHYPE)
+        quoteDepositWei = hypeLpWei;
+        quoteDepositedDisplay = `${hypeLp} ${quoteSymbol}`;
+
+        notify(5, `Wrap ${hypeLp} HYPE -> WHYPE & Approve PositionManager...`);
+        const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
+        await wrapTx.wait();
+        const appWhypeTx = await whypeContract.approve(this.v3PositionManager, ethers.MaxUint256);
+        await appWhypeTx.wait();
+        initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
+      }
+
+      // Approve token to PositionManager
+      notify(5, `Approve ${symbol} ke NonfungiblePositionManager...`);
+      const appTokenTx = await tokenContract.approve(this.v3PositionManager, ethers.MaxUint256);
+      await appTokenTx.wait();
+
+      // Determine token0 and token1 ordering (strictly sorted by address)
+      const isToken0 = tokenAddress.toLowerCase() < quoteAddress.toLowerCase();
+      const token0 = isToken0 ? tokenAddress : quoteAddress;
+      const token1 = isToken0 ? quoteAddress : tokenAddress;
+      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+
+      // Calculate sqrtPriceX96
+      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+
+      // Create and initialize pool
+      notify(5, `Membuat & menginisialisasi Pool Uniswap V3 (Fee: ${feeTier})...`);
+      const initTx = await npm.createAndInitializePoolIfNecessary(token0, token1, feeTier, sqrtPriceX96);
+      await initTx.wait();
+
+      // Fetch pool address
+      poolAddress = await factory.getPool(token0, token1, feeTier);
+
+      // Compute full-range tick limits
+      const tickSpacing = Number(await factory.feeAmountTickSpacing(feeTier));
+      const minTick = -887272;
+      const maxTick = 887272;
+      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+
+      // Mint Full-Range Liquidity Position
+      notify(5, `Menyetor likuiditas penuh (Full-Range Mint) ke Uniswap V3...`);
+      const deadline = Math.floor(Date.now() / 1000) + 1200;
+      const mintTx = await npm.mint({
+        token0,
+        token1,
+        fee: feeTier,
+        tickLower,
+        tickUpper,
+        amount0Desired,
+        amount1Desired,
+        amount0Min: 0n,
+        amount1Min: 0n,
+        recipient: wallet.address,
+        deadline
+      });
+      const mintReceipt = await mintTx.wait();
+      addLiquidityTxHash = mintTx.hash;
+
+      // Extract Position NFT ID
+      if (mintReceipt.logs) {
+        for (const log of mintReceipt.logs) {
+          try {
+            const parsed = npm.interface.parseLog(log);
+            if (parsed && parsed.name === 'IncreaseLiquidity') {
+              positionTokenId = parsed.args.tokenId.toString();
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      notify(5, `Likuiditas Uniswap V3 berhasil disetor! Pool: ${poolAddress} ${positionTokenId ? `(NFT #${positionTokenId})` : ''}`);
+
+    } else {
+      // Uniswap V2 Fallback
+      quoteDepositedDisplay = `${hypeLp} HYPE`;
+      initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
+      notify(5, `Menyetor likuiditas ke Uniswap V2 (${hypeLp} HYPE + ${ethers.formatUnits(tokenLp, 18)} ${symbol})...`);
+      const router = new ethers.Contract(this.routerAddress, ROUTER_ABI, wallet);
+      
+      const approveTx = await tokenContract.approve(this.routerAddress, ethers.MaxUint256);
+      await approveTx.wait();
+
+      const deadline = Math.floor(Date.now() / 1000) + 1200;
+      const addLiqTx = await router.addLiquidityETH(
+        tokenAddress,
+        tokenLp,
+        0,
+        0,
+        wallet.address,
+        deadline,
+        { value: hypeLpWei }
+      );
+      await addLiqTx.wait();
+      addLiquidityTxHash = addLiqTx.hash;
+
+      const factoryAddress = await router.factory();
+      const wethAddress = await router.WETH();
+      const factory = new ethers.Contract(factoryAddress, FACTORY_ABI, wallet);
+      poolAddress = await factory.getPair(tokenAddress, wethAddress);
+      notify(5, `Likuiditas Uniswap V2 berhasil disetor! Tx: ${addLiquidityTxHash}`);
+    }
+
+    // Step 5: Configure Pair on token
     notify(6, 'Mendeteksi Pool Pair dan mengonfigurasi Anti-Sniper...');
-    const factoryAddress = await router.factory();
-    const wethAddress = await router.WETH();
-    const factory = new ethers.Contract(factoryAddress, FACTORY_ABI, wallet);
-    const poolAddress = await factory.getPair(tokenAddress, wethAddress);
-
     const setPairTx = await tokenContract.setPair(poolAddress);
     await setPairTx.wait();
     const setPairTxHash = setPairTx.hash;
@@ -320,28 +563,91 @@ export class ElysiumService {
     // Step 7: Dev Buy
     let devBuyTxHash = '';
     if (devBuyWei > 0n) {
-      notify(8, `Menjalankan Dev Buy sebesar ${devBuyHype} HYPE via Uniswap V2...`);
-      try {
-        const path = [wethAddress, tokenAddress];
-        const devBuyDeadline = Math.floor(Date.now() / 1000) + 600;
-        const devBuyTx = await router.swapExactETHForTokens(
-          0,
-          path,
-          wallet.address,
-          devBuyDeadline,
-          { value: devBuyWei }
-        );
-        await devBuyTx.wait();
-        devBuyTxHash = devBuyTx.hash;
-        notify(8, `Dev Buy sebesar ${devBuyHype} HYPE berhasil dieksekusi! Tx: ${devBuyTxHash}`);
-      } catch (buyErr) {
-        console.warn('Dev Buy failed to execute:', buyErr.message);
-        notify(8, `Peringatan Dev Buy: ${buyErr.message}`);
+      if (dexVersion === 'v3') {
+        notify(8, `Menjalankan Dev Buy sebesar ${devBuyHype} HYPE via Uniswap V3...`);
+        try {
+          const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
+          const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
+
+          // Wrap Dev Buy HYPE to WHYPE
+          const wrapDevTx = await whypeContract.deposit({ value: devBuyWei });
+          await wrapDevTx.wait();
+          const appDevTx = await whypeContract.approve(this.v3SwapRouter, devBuyWei);
+          await appDevTx.wait();
+
+          const devBuyDeadline = Math.floor(Date.now() / 1000) + 600;
+
+          if (quoteSymbol === 'USDC') {
+            // Multi-hop Dev Buy: HYPE -> USDC -> TOKEN
+            const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
+            const swapToUsdc = await swapRouter.exactInputSingle({
+              tokenIn: this.wethAddress,
+              tokenOut: this.usdcAddress,
+              fee: 10000,
+              recipient: wallet.address,
+              deadline: devBuyDeadline,
+              amountIn: devBuyWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await swapToUsdc.wait();
+            const usdcAmt = await usdcContract.balanceOf(wallet.address);
+            await (await usdcContract.approve(this.v3SwapRouter, usdcAmt)).wait();
+
+            const buyTokenTx = await swapRouter.exactInputSingle({
+              tokenIn: this.usdcAddress,
+              tokenOut: tokenAddress,
+              fee: feeTier,
+              recipient: wallet.address,
+              deadline: devBuyDeadline,
+              amountIn: usdcAmt,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await buyTokenTx.wait();
+            devBuyTxHash = buyTokenTx.hash;
+          } else {
+            // Direct Dev Buy: WHYPE -> TOKEN
+            const devBuyTx = await swapRouter.exactInputSingle({
+              tokenIn: this.wethAddress,
+              tokenOut: tokenAddress,
+              fee: feeTier,
+              recipient: wallet.address,
+              deadline: devBuyDeadline,
+              amountIn: devBuyWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await devBuyTx.wait();
+            devBuyTxHash = devBuyTx.hash;
+          }
+          notify(8, `Dev Buy sebesar ${devBuyHype} HYPE berhasil dieksekusi! Tx: ${devBuyTxHash}`);
+        } catch (buyErr) {
+          console.warn('Dev Buy V3 warning:', buyErr.message);
+          notify(8, `Peringatan Dev Buy: ${buyErr.message}`);
+        }
+      } else {
+        notify(8, `Menjalankan Dev Buy sebesar ${devBuyHype} HYPE via Uniswap V2...`);
+        try {
+          const router = new ethers.Contract(this.routerAddress, ROUTER_ABI, wallet);
+          const path = [await router.WETH(), tokenAddress];
+          const devBuyDeadline = Math.floor(Date.now() / 1000) + 600;
+          const devBuyTx = await router.swapExactETHForTokens(
+            0,
+            path,
+            wallet.address,
+            devBuyDeadline,
+            { value: devBuyWei }
+          );
+          await devBuyTx.wait();
+          devBuyTxHash = devBuyTx.hash;
+          notify(8, `Dev Buy sebesar ${devBuyHype} HYPE berhasil dieksekusi! Tx: ${devBuyTxHash}`);
+        } catch (buyErr) {
+          console.warn('Dev Buy V2 warning:', buyErr.message);
+          notify(8, `Peringatan Dev Buy: ${buyErr.message}`);
+        }
       }
     }
-
-    // Calculate Initial Price
-    const initialPriceHype = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
 
     // Step 8: Verifikasi Kontrak di Elyscan (Async)
     let isTokenVerified = false;
@@ -369,6 +675,8 @@ export class ElysiumService {
       }
     }
 
+    const dexName = dexVersion === 'v3' ? 'Uniswap V3' : 'Uniswap V2';
+
     // Save record to storage
     const record = storage.saveElysiumDeployedToken({
       name,
@@ -381,10 +689,15 @@ export class ElysiumService {
       feeWallet,
       buyFee,
       sellFee,
+      dexVersion: dexName,
+      pairToken: quoteSymbol,
+      quoteDeposited: quoteDepositedDisplay,
       hypeDeposited: hypeLp,
       devBuyHype: devBuyHype,
       tokenDeposited: ethers.formatUnits(tokenLp, 18),
-      initialPriceHype,
+      initialPriceHype: initialPrice,
+      positionTokenId,
+      v3FeeTier: feeTier,
       deployTx: deployTxHash,
       lockTx: lockTransferTxHash || lockDeployTxHash,
       addLiquidityTx: addLiquidityTxHash,
@@ -396,6 +709,9 @@ export class ElysiumService {
 
     return {
       success: true,
+      dexVersion: dexName,
+      pairToken: quoteSymbol,
+      positionTokenId,
       token: {
         name,
         symbol,
@@ -412,11 +728,16 @@ export class ElysiumService {
         isVerified: isLockVerified
       },
       liquidity: {
+        dexName,
         poolAddress,
+        quoteToken: quoteSymbol,
+        quoteDeposited: quoteDepositedDisplay,
+        positionTokenId,
         hypeDeposited: `${hypeLp} HYPE`,
         devBuyHype: devBuyTxHash ? `${devBuyHype} HYPE` : (devBuyWei > 0n ? `${devBuyHype} HYPE (Attempted)` : '0 HYPE'),
         tokensDeposited: `${ethers.formatUnits(tokenLp, 18)} ${symbol}`,
-        initialPriceHype,
+        initialPrice,
+        initialPriceHype: initialPrice,
         addLiquidityTxHash,
         setPairTxHash,
         enableTradingTxHash,
@@ -433,4 +754,3 @@ export class ElysiumService {
 }
 
 export const elysiumService = new ElysiumService();
-
