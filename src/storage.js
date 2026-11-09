@@ -154,7 +154,7 @@ export class Storage {
       feeWallet: record.feeWallet || record.deployerAddress,
       buyFee: record.buyFee || 5,
       sellFee: record.sellFee || 5,
-      dexVersion: record.dexVersion || 'Uniswap V3',
+      dexVersion: record.dexVersion || 'Uniswap V4',
       pairToken: record.pairToken || 'HYPE',
       quoteDeposited: record.quoteDeposited || record.hypeDeposited || '0.0001',
       hypeDeposited: record.hypeDeposited || '0.0001',
@@ -423,11 +423,13 @@ export class Storage {
 
   getElysiumDexVersion() {
     const state = this.getState();
-    return state.elysiumDexVersion || config.elysiumDefaultDex || 'v3'; // 'v3' (default) or 'v2'
+    return state.elysiumDexVersion || config.elysiumDefaultDex || 'v4'; // 'v4' (default), 'v3', or 'v2'
   }
 
   setElysiumDexVersion(version) {
-    const target = String(version).toLowerCase() === 'v2' ? 'v2' : 'v3';
+    const raw = String(version).toLowerCase().trim();
+    const valid = ['v4', 'v3', 'v2'];
+    const target = valid.includes(raw) ? raw : 'v4';
     const state = this.getState();
     state.elysiumDexVersion = target;
     this.saveState(state);

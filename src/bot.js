@@ -478,15 +478,15 @@ export class TelegramBotApp {
       );
     });
 
-    // /elysiumdex command (set DEX version: v3 or v2)
+    // /elysiumdex command (set DEX version: v4, v3, or v2)
     bot.command(['elysiumdex', 'dex'], async (ctx) => {
       const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
       if (parts.length === 0) {
         return this.sendElysiumDexMenu(ctx);
       }
       const raw = parts[0].toLowerCase();
-      if (!['v3', 'v2'].includes(raw)) {
-        return ctx.replyWithHTML('⚠️ Gunakan <code>/elysiumdex v3</code> (Uniswap V3 - Disarankan) atau <code>/elysiumdex v2</code> (Uniswap V2).');
+      if (!['v4', 'v3', 'v2'].includes(raw)) {
+        return ctx.replyWithHTML('⚠️ Gunakan <code>/elysiumdex v4</code> (Uniswap V4 - Standar Elysium), <code>/elysiumdex v3</code>, atau <code>/elysiumdex v2</code>.');
       }
       storage.setElysiumDexVersion(raw);
       await ctx.replyWithHTML(`✅ <b>DEX Engine Elysium berhasil diatur ke: Uniswap ${raw.toUpperCase()}!</b>`);
@@ -2242,7 +2242,7 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
     const balanceUsdcDisplay = `<b>${parseFloat(info.balanceUsdc || 0).toFixed(4)} USDC</b>`;
     const gasDisplay = `<code>${info.gasPriceGwei} Gwei</code>`;
 
-    const dexBadge = curDex === 'V3' ? '🦄 <b>Uniswap V3 (Aktif & Rekomendasi)</b>' : '🥞 <b>Uniswap V2</b>';
+    const dexBadge = curDex === 'V4' ? '✨ <b>Uniswap V4 (Standar Utama & Aktif)</b>' : (curDex === 'V3' ? '🦄 <b>Uniswap V3</b>' : '🥞 <b>Uniswap V2</b>');
     const pairBadge = curPair === 'USDC' ? '💵 <b>TOKEN / USDC (Stablecoin)</b>' : (curPair === 'WETH' ? '📦 <b>TOKEN / WETH (Wrapped)</b>' : (curPair === 'ETH' ? '⚡ <b>TOKEN / ETH (Native)</b>' : '💎 <b>TOKEN / HYPE (Gas Native)</b>'));
 
     const msg = 
@@ -2255,8 +2255,9 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 • Saldo Gas (HYPE): ${balanceHypeDisplay}
 • Saldo USDC: ${balanceUsdcDisplay}
 • Estimasi Gas: ${gasDisplay}
-• Position Manager V3: <code>${info.v3PositionManager}</code>
-• Swap Router V3: <code>${info.v3SwapRouter}</code>
+• PoolManager V4: <code>${info.v4PoolManager || '0xE2e1...'}</code>
+• Position Manager V4: <code>${info.v4PositionManager || '0x1d1C...'}</code>
+• Universal Router: <code>${info.universalRouter || '0xA13f...'}</code>
 
 ⚙️ <b>SETTING TRADING &amp; LIQUIDITY:</b>
 • DEX Engine: ${dexBadge}
@@ -2277,7 +2278,7 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
       ],
       [
         Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_elysium_pair_menu'),
-        Markup.button.callback(`🦄 DEX: Uniswap ${curDex}`, 'cmd_elysium_dex_menu')
+        Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_elysium_dex_menu')
       ],
       [
         Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu'),
@@ -2307,7 +2308,7 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Pilih quote token pasangan likuiditas yang akan digunakan saat deploy token di Elysium Mainnet:
 
-💎 <b>HYPE (Native Gas):</b> Pasangan default native coin Elysium (0.0001 - 0.0002 HYPE). Dibungkus ke WHYPE untuk V3 pool.
+💎 <b>HYPE (Native Gas):</b> Pasangan default native coin Elysium (0.0001 - 0.0002 HYPE). Di Uniswap V4 disetor langsung sebagai native gas tanpa perlu wrap ke WETH!
 ⚡ <b>ETH:</b> Pasangan native ETH/HYPE pada chain Elysium.
 💵 <b>USDC:</b> Pasangan stablecoin USD Coin (<code>0xb47c...</code>). Jika saldo USDC deployer kosong, bot otomatis menukar sebagian kecil HYPE ke USDC!
 📦 <b>WETH:</b> Pasangan Wrapped Elysium WETH9 (<code>0xbA87...</code>).
@@ -2348,11 +2349,16 @@ Pilih quote token pasangan likuiditas yang akan digunakan saat deploy token di E
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Pilih versi protokol DEX yang digunakan untuk membuat pool likuiditas & dev buy:
 
-🦄 <b>Uniswap V3 (Rekomendasi & Default):</b>
+✨ <b>Uniswap V4 (Default & Standar Elysium Mainnet):</b>
+• Singleton PoolManager & Position NFT (UNI-V4-POSM)
+• Dukungan Native Gas HYPE langsung (address 0)
+• UniversalRouter eksekusi swap berkecepatan tinggi
+• 3,240+ pool aktif live di Elysium Mainnet
+
+🦄 <b>Uniswap V3:</b>
 • NonfungiblePositionManager NFT
 • Concentrated / Full-Range Liquidity
 • SwapRouter Single-Hop & Multi-Hop
-• Efisiensi modal tinggi & standar likuiditas Elysium
 
 🥞 <b>Uniswap V2 (Fallback Klasik):</b>
 • Router V2 addLiquidityETH
@@ -2360,16 +2366,20 @@ Pilih versi protokol DEX yang digunakan untuk membuat pool likuiditas & dev buy:
 
 🎯 <b>DEX Aktif Saat Ini:</b> <b>Uniswap ${curDex.toUpperCase()}</b>
 
-<i>Pilih DEX di bawah atau gunakan:</i> <code>/elysiumdex [v3|v2]</code>`;
+<i>Pilih DEX di bawah atau gunakan:</i> <code>/elysiumdex [v4|v3|v2]</code>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback(`${check('v3')}🦄 Uniswap V3 (Default & Disarankan)`, 'set_elys_dex_v3'),
-        Markup.button.callback(`${check('v2')}🥞 Uniswap V2`, 'set_elys_dex_v2')
+        Markup.button.callback(`${check('v4')}✨ Uniswap V4 (Standar Utama & Aktif)`, 'set_elys_dex_v4'),
+        Markup.button.callback(`${check('v3')}🦄 Uniswap V3`, 'set_elys_dex_v3')
       ],
       [
-        Markup.button.callback('🔄 Atur Trading Pair', 'cmd_elysium_pair_menu'),
-        Markup.button.callback('🪐 Menu Elysium', 'cmd_elysium_menu')
+        Markup.button.callback(`${check('v2')}🥞 Uniswap V2 (Legacy)`, 'set_elys_dex_v2'),
+        Markup.button.callback('🔄 Atur Trading Pair', 'cmd_elysium_pair_menu')
+      ],
+      [
+        Markup.button.callback('🪐 Kembali ke Menu Elysium', 'cmd_elysium_menu'),
+        Markup.button.callback('⬅️ Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
 
@@ -2523,8 +2533,8 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
     const hypeLp = String(options.hypeLiquidity || storage.getElysiumLpHype() || '0.0001');
     const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0.0001'));
     const pairChoice = options.pair || storage.getElysiumPairToken() || 'HYPE';
-    const dexVersion = options.dexVersion || storage.getElysiumDexVersion() || 'v3';
-    const dexName = dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2';
+    const dexVersion = options.dexVersion || storage.getElysiumDexVersion() || 'v4';
+    const dexName = dexVersion.toLowerCase() === 'v4' ? 'Uniswap V4' : (dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2');
 
     const initialMsg = await ctx.replyWithHTML(
       `🪐 <b>MEMULAI DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
@@ -2579,7 +2589,7 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
 💧 <b>${result.dexVersion} Pool &amp; Likuiditas:</b>
 • Trading Pair: <b>TOKEN / ${result.pairToken}</b>
 • Alamat Pool (Pair): <code>${result.liquidity.poolAddress}</code>
-${result.positionTokenId ? `• Position NFT: <b>Uniswap V3 Position #${result.positionTokenId}</b>\n` : ''}• Likuiditas Awal: <b>${result.liquidity.quoteDeposited}</b> + <b>${result.liquidity.tokensDeposited}</b>
+${result.positionTokenId ? `• Position NFT: <b>${result.dexVersion} Position #${result.positionTokenId}</b>\n` : ''}• Likuiditas Awal: <b>${result.liquidity.quoteDeposited}</b> + <b>${result.liquidity.tokensDeposited}</b>
 • Dev Buy Otomatis: <b>${result.liquidity.devBuyHype}</b>
 • Harga Awal: <code>${result.liquidity.initialPrice} ${result.pairToken}</code>
 • Trading: <b>🟢 AKTIF (Bisa dibeli &amp; dijual langsung!)</b>
@@ -2598,7 +2608,7 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
       const buttons = [
         [
           Markup.button.url('🔍 Lihat di Elyscan', result.urls.tokenExplorer),
-          Markup.button.url('📊 DexScreener', result.urls.dexscreener)
+          Markup.button.url(result.dexVersion === 'Uniswap V4' ? '🦎 GeckoTerminal' : '📊 DexScreener', result.urls.dexscreener)
         ],
         [
           Markup.button.url('💧 Lihat Pool di Explorer', result.urls.poolExplorer)
