@@ -146,6 +146,7 @@ export class Storage {
       id: record.id || Date.now().toString(),
       name: record.name,
       symbol: record.symbol,
+      imageUrl: record.imageUrl || 'https://assets.coingecko.com/coins/images/placeholder.png',
       totalSupply: record.totalSupply || '100000000000',
       tokenAddress: record.tokenAddress,
       poolAddress: record.poolAddress,

@@ -18,6 +18,15 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;');
 }
 
+function toHttpImageUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('ipfs://')) {
+    const hash = url.replace('ipfs://', '');
+    return `https://gateway.pinata.cloud/ipfs/${hash}`;
+  }
+  return url;
+}
+
 export class TelegramBotApp {
   constructor() {
     this.token = config.telegramToken;
@@ -95,16 +104,16 @@ export class TelegramBotApp {
 • <code>/status</code> - Cek saldo ETH 3 wallet & estimasi gas Base
 • <code>/fee [3|5|10]</code> - Atur fee buy & sell token (3%, 5%, 10% Max)
 • <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
-• <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [LP] [Pair] [Fee%]</code> - Deploy token langsung ke Elysium Mainnet (+ Uniswap V3 Pool & Verified)
+• <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpHype] [Fee%] [ImageUrl]</code> - Deploy token ke Elysium (+ Uniswap V4 Pool, Pinata IPFS Logo &amp; Verified)
 • <code>/elysiumpair [hype|eth|usdc|weth]</code> - Atur trading pair (HYPE, ETH, USDC, WETH)
-• <code>/elysiumdex [v3|v2]</code> - Atur DEX Engine (Uniswap V3 Default / Uniswap V2)
+• <code>/elysiumdex [v4|v3|v2]</code> - Atur DEX Engine (Uniswap V4 Standar / V3 / V2)
 • <code>/elysiumlp [0.0001-0.0002]</code> - Atur likuiditas pool awal HYPE (0.0001 s/d 0.0002 HYPE)
 • <code>/devbuyelys [0.0001|off]</code> - Atur dev buy otomatis sesaat setelah trading dibuka (0.0001 HYPE)
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>Fitur Unggulan Baru:</b>
-1. <b>🪐 Elysium Mainnet Launchpad:</b> Deploy token ERC-20 mandiri ke Elysium Mainnet (Chain 99901, gas HYPE), otomatis set up Uniswap V3 concentrated pool (Pair HYPE/ETH/USDC/WETH), proteksi sniper 80% buy tax 30 menit, dan 100% verifikasi otomatis di Elyscan!
+1. <b>🪐 Elysium Mainnet Launchpad:</b> Deploy token ERC-20 mandiri ke Elysium Mainnet (Chain 99901, gas HYPE), otomatis set up Uniswap V4 pool (Pair HYPE/ETH/USDC/WETH), upload logo ke IPFS via Pinata (seperti di Clanker), proteksi sniper 80% buy tax 30 menit, dan 100% verifikasi otomatis di Elyscan!
 2. <b>Multi-Wallet Simultan:</b> Menjalankan 3 wallet secara bersamaan di Base Network, masing-masing mendeploy token berbeda tanpa duplikasi!
 3. <b>Radar Hype Terlengkap:</b> Memantau OKX Web3 Hot Tokens & Social Hype, Elysium DEX, Clanker.world, DexScreener, GeckoTerminal, dan Pump.fun!
 4. <b>Kontrol Terpisah Telegram:</b> Atur saldo, private key, dan auto-deploy masing-masing wallet secara mandiri lewat dashboard!`;
@@ -413,11 +422,12 @@ export class TelegramBotApp {
       if (parts.length < 2) {
         return ctx.replyWithHTML(
           '⚠️ <b>Format salah!</b>\n\n' +
-          'Gunakan: <code>/deployelysium &lt;NamaToken&gt; &lt;Ticker&gt; [LP] [Pair: HYPE|ETH|USDC|WETH] [Fee%]</code>\n' +
+          'Gunakan: <code>/deployelysium &lt;NamaToken&gt; &lt;Ticker&gt; [Pair] [LP] [Fee%] [ImageUrl]</code>\n' +
           '<i>Contoh:</i>\n' +
           '• <code>/deployelysium PepeElysium PEPE</code> (Gunakan default LP & Pair)\n' +
-          '• <code>/deployelysium CyberDog CDOG 0.0001 USDC 5</code>\n' +
-          '• <code>/deployelysium RoboAI ROBO 0.0001 ETH 5</code>\n\n' +
+          '• <code>/deployelysium CyberDog CDOG USDC 0.0001 5 https://assets.coingecko.com/coins/images/placeholder.png</code>\n' +
+          '• <code>/deployelysium RoboAI ROBO HYPE 0.0001 5</code>\n\n' +
+          '<i>Logo akan otomatis diunggah ke IPFS via Pinata seperti di Clanker!</i>\n\n' +
           'Atau ketik <code>/deployelysium</code> saja untuk membuka panduan & menu preset interaktif.'
         );
       }
@@ -428,12 +438,15 @@ export class TelegramBotApp {
       let hypeLp = String(storage.getElysiumLpHype());
       let pairChoice = storage.getElysiumPairToken();
       let fee = 5;
+      let imageUrl = '';
 
       const validPairs = ['HYPE', 'ETH', 'USDC', 'WETH'];
 
       for (let i = 2; i < parts.length; i++) {
         const item = parts[i];
-        if (validPairs.includes(item.toUpperCase())) {
+        if (item.startsWith('http://') || item.startsWith('https://') || item.startsWith('ipfs://')) {
+          imageUrl = item;
+        } else if (validPairs.includes(item.toUpperCase())) {
           pairChoice = item.toUpperCase();
         } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0.0001 && parseFloat(item) <= 0.0002) {
           hypeLp = item;
@@ -445,6 +458,7 @@ export class TelegramBotApp {
       await this.executeDeployElysium(ctx, {
         name,
         symbol,
+        imageUrl,
         pair: pairChoice,
         hypeLiquidity: hypeLp,
         buyFee: fee,
@@ -887,6 +901,7 @@ export class TelegramBotApp {
       await this.executeDeployElysium(ctx, {
         name: 'Wrapped Elysium',
         symbol: 'WELYSIUM',
+        imageUrl: 'https://raw.githubusercontent.com/ebeljaya8-cpu/asa/main/data/elysium-logo.png',
         hypeLiquidity: String(curLp),
         isWelysium: true,
         buyFee: 5,
@@ -905,6 +920,7 @@ export class TelegramBotApp {
       await this.executeDeployElysium(ctx, {
         name: `Elysium Gem ${randomTag}`,
         symbol: `GEM${randomTag}`,
+        imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
         hypeLiquidity: String(curLp),
         buyFee: 5,
         sellFee: 5,
@@ -927,6 +943,7 @@ export class TelegramBotApp {
       await this.executeDeployElysium(ctx, {
         name: targetToken.name,
         symbol: targetToken.symbol,
+        imageUrl: targetToken.imageUrl,
         hypeLiquidity: String(curLp),
         buyFee: 5,
         sellFee: 5,
@@ -2519,7 +2536,7 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
 • Pool: <code>${t.poolAddress || 'N/A'}</code> ${t.positionTokenId ? `(NFT #${t.positionTokenId})` : ''}
 • LP: <b>${t.quoteDeposited || `${t.hypeDeposited} HYPE`}</b> + <b>${t.tokenDeposited} Token</b>
 • Waktu: <i>${new Date(t.deployedAt).toLocaleString('id-ID')}</i>
-• Link: <a href="${t.explorerUrl}">Elyscan</a> | <a href="${t.dexscreenerUrl}">DexScreener</a>
+• Link: <a href="${t.explorerUrl}">Elyscan</a> | <a href="${t.dexscreenerUrl}">DexScreener</a>${t.imageUrl ? ` | <a href="${toHttpImageUrl(t.imageUrl)}">Logo</a>` : ''}
 ──────────────────────────\n`;
     }
 
@@ -2540,6 +2557,7 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
       `🪐 <b>MEMULAI DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+      `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
       `• DEX Engine: <b>${dexName}</b>\n` +
       `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
       `• Likuiditas Pool: <b>${hypeLp} HYPE / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
@@ -2583,6 +2601,7 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
 • Nama: <b>${escapeHtml(result.token.name)}</b>
 • Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
 • Kontrak Token: <code>${result.token.address}</code>
+• Logo IPFS/URL: <a href="${toHttpImageUrl(result.token?.imageUrl || options.imageUrl)}">Lihat Gambar Logo</a>
 • Total Supply: <b>100.000.000.000 (100B)</b>
 • Status Verifikasi: <b>${result.token.isVerified ? '🟢 Verified di Elyscan' : '🟡 Sedang Diproses Elyscan'}</b>
 
@@ -2619,7 +2638,23 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
         ]
       ];
 
-      await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+      const rawLogo = result.token?.imageUrl || options.imageUrl || result.imageUrl;
+      const photoUrl = toHttpImageUrl(rawLogo);
+
+      if (photoUrl && photoUrl.startsWith('http')) {
+        try {
+          await ctx.replyWithPhoto(photoUrl, {
+            caption: summaryMsg,
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard(buttons)
+          });
+        } catch (photoErr) {
+          console.warn('[ElysiumBot] replyWithPhoto failed, fallback to replyWithHTML:', photoErr.message);
+          await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+        }
+      } else {
+        await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+      }
     } catch (err) {
       console.error('Error during Elysium deploy:', err);
       await ctx.replyWithHTML(

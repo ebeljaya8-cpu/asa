@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { ethers } from 'ethers';
 import { config } from '../config.js';
 import { storage } from '../storage.js';
+import { pinataService } from '../pinataService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -466,6 +467,22 @@ export class ElysiumService {
     const airdropAmount2 = airdrop2 !== ethers.ZeroAddress ? (options.airdropAmount2 ? BigInt(options.airdropAmount2) : ethers.parseEther('10000000000')) : 0n;
 
     const isWrappedElysiumOriginal = options.isWelysium || (name.toLowerCase() === 'wrapped elysium' && symbol === 'WELYSIUM');
+
+    // Logo / Image Handling (Similar to Clanker IPFS flow)
+    let rawImageUrl = options.imageUrl || (isWrappedElysiumOriginal 
+      ? 'https://raw.githubusercontent.com/ebeljaya8-cpu/asa/main/data/elysium-logo.png' 
+      : 'https://assets.coingecko.com/coins/images/placeholder.png');
+
+    let finalImageUrl = rawImageUrl;
+    if (rawImageUrl && !rawImageUrl.startsWith('ipfs://')) {
+      try {
+        notify(1, 'Memproses & mengunggah logo token ke IPFS via Pinata...');
+        finalImageUrl = await pinataService.uploadFromUrl(rawImageUrl, `${symbol.toLowerCase()}.png`);
+        notify(1, `Logo token IPFS siap: ${finalImageUrl}`);
+      } catch (imgErr) {
+        console.warn('[ElysiumService] Pinata upload skipped, using direct URL:', imgErr.message);
+      }
+    }
 
     let tokenAddress;
     let tokenContract;
@@ -1033,6 +1050,7 @@ export class ElysiumService {
     const record = storage.saveElysiumDeployedToken({
       name,
       symbol,
+      imageUrl: finalImageUrl,
       totalSupply: ethers.formatUnits(totalSupply, 18),
       tokenAddress,
       poolAddress,
@@ -1076,6 +1094,7 @@ export class ElysiumService {
         name,
         symbol,
         address: tokenAddress,
+        imageUrl: finalImageUrl,
         totalSupply: ethers.formatUnits(totalSupply, 18),
         deployTxHash,
         isVerified: isTokenVerified
