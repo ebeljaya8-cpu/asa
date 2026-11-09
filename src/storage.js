@@ -6,6 +6,7 @@ export class Storage {
   constructor() {
     this.dataFile = config.dataFile;
     this.dataFileElysium = config.dataFileElysium;
+    this.dataFileBaseDirect = config.dataFileBaseDirect;
     this.stateFile = config.stateFile;
     this.init();
   }
@@ -22,6 +23,10 @@ export class Storage {
 
     if (!fs.existsSync(this.dataFileElysium)) {
       fs.writeFileSync(this.dataFileElysium, JSON.stringify([], null, 2));
+    }
+
+    if (!fs.existsSync(this.dataFileBaseDirect)) {
+      fs.writeFileSync(this.dataFileBaseDirect, JSON.stringify([], null, 2));
     }
 
     if (!fs.existsSync(this.stateFile)) {
@@ -185,6 +190,65 @@ export class Storage {
     // Update state stats
     const state = this.getState();
     state.totalElysiumDeployedCount = (state.totalElysiumDeployedCount || 0) + 1;
+    this.saveState(state);
+    return entry;
+  }
+
+  getBaseDirectDeployedTokens() {
+    try {
+      if (!fs.existsSync(this.dataFileBaseDirect)) return [];
+      const data = fs.readFileSync(this.dataFileBaseDirect, 'utf-8');
+      return JSON.parse(data) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveBaseDirectDeployedToken(record) {
+    const tokens = this.getBaseDirectDeployedTokens();
+    const explorer = config.baseExplorer || 'https://basescan.org';
+    const entry = {
+      id: record.id || Date.now().toString(),
+      name: record.name,
+      symbol: record.symbol,
+      imageUrl: record.imageUrl || 'https://assets.coingecko.com/coins/images/placeholder.png',
+      totalSupply: record.totalSupply || '100000000000',
+      tokenAddress: record.tokenAddress,
+      poolAddress: record.poolAddress,
+      deployerAddress: record.deployerAddress,
+      feeWallet: record.feeWallet || record.deployerAddress,
+      buyFee: record.buyFee || 5,
+      sellFee: record.sellFee || 5,
+      dexVersion: record.dexVersion || 'Uniswap V4',
+      pairToken: record.pairToken || 'ETH',
+      quoteDeposited: record.quoteDeposited || record.ethDeposited || '0.0001',
+      ethDeposited: record.ethDeposited || '0.0001',
+      devBuyEth: record.devBuyEth || '0.0001',
+      tokenDeposited: record.tokenDeposited || '20000000000',
+      initialPriceEth: record.initialPriceEth || 0,
+      positionTokenId: record.positionTokenId || null,
+      v3FeeTier: record.v3FeeTier || 10000,
+      deployTx: record.deployTx || '',
+      addLiquidityTx: record.addLiquidityTx || '',
+      setPairTx: record.setPairTx || '',
+      enableTradingTx: record.enableTradingTx || '',
+      devBuyTx: record.devBuyTx || '',
+      isVerified: Boolean(record.isVerified),
+      deployedAt: new Date().toISOString(),
+      network: 'Base Mainnet',
+      chainId: 8453,
+      explorerUrl: `${explorer}/token/${record.tokenAddress}`,
+      poolExplorerUrl: record.poolAddress ? `${explorer}/address/${record.poolAddress}` : '',
+      dexscreenerUrl: record.poolAddress ? `https://dexscreener.com/base/${record.poolAddress}` : `https://dexscreener.com/base/${record.tokenAddress}`,
+      geckoterminalUrl: record.poolAddress ? `https://www.geckoterminal.com/base/pools/${record.poolAddress}` : `https://www.geckoterminal.com/base/pools/${record.tokenAddress}`
+    };
+
+    tokens.unshift(entry);
+    fs.writeFileSync(this.dataFileBaseDirect, JSON.stringify(tokens.slice(0, 500), null, 2));
+
+    // Update state stats
+    const state = this.getState();
+    state.totalBaseDirectDeployedCount = (state.totalBaseDirectDeployedCount || 0) + 1;
     this.saveState(state);
     return entry;
   }
@@ -462,6 +526,78 @@ export class Storage {
     const target = valid.includes(Number(fee)) ? Number(fee) : 10000;
     const state = this.getState();
     state.elysiumV3FeeTier = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getBaseDirectLpEth() {
+    const state = this.getState();
+    return state.baseDirectLpEth !== undefined ? state.baseDirectLpEth : (config.baseDirectDefaultLpEth || 0.0001);
+  }
+
+  setBaseDirectLpEth(amount) {
+    const num = parseFloat(amount);
+    const target = !isNaN(num) && num >= 0.0001 && num <= 0.002 ? num : 0.0001;
+    const state = this.getState();
+    state.baseDirectLpEth = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getBaseDirectDevBuyEth() {
+    const state = this.getState();
+    return state.baseDirectDevBuyEth !== undefined ? state.baseDirectDevBuyEth : (config.baseDirectDevBuyEth || 0.0001);
+  }
+
+  setBaseDirectDevBuyEth(amount) {
+    const num = parseFloat(amount);
+    const target = isNaN(num) || num < 0 ? 0 : num;
+    const state = this.getState();
+    state.baseDirectDevBuyEth = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getBaseDirectDexVersion() {
+    const state = this.getState();
+    return state.baseDirectDexVersion || config.baseDirectDefaultDex || 'v4'; // 'v4' (default), 'v3', 'v2'
+  }
+
+  setBaseDirectDexVersion(version) {
+    const raw = String(version).toLowerCase().trim();
+    const valid = ['v4', 'v3', 'v2'];
+    const target = valid.includes(raw) ? raw : 'v4';
+    const state = this.getState();
+    state.baseDirectDexVersion = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getBaseDirectPairToken() {
+    const state = this.getState();
+    return state.baseDirectPairToken || config.baseDirectDefaultPair || 'ETH'; // 'ETH', 'USDC', 'WETH'
+  }
+
+  setBaseDirectPairToken(token) {
+    const upper = (token || 'ETH').toUpperCase().trim();
+    const valid = ['ETH', 'USDC', 'WETH'];
+    const target = valid.includes(upper) ? upper : 'ETH';
+    const state = this.getState();
+    state.baseDirectPairToken = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getBaseDirectV3FeeTier() {
+    const state = this.getState();
+    return state.baseDirectV3FeeTier || 10000; // 10000 (1%) standard Base V3 meme fee
+  }
+
+  setBaseDirectV3FeeTier(fee) {
+    const valid = [100, 500, 3000, 10000];
+    const target = valid.includes(Number(fee)) ? Number(fee) : 10000;
+    const state = this.getState();
+    state.baseDirectV3FeeTier = target;
     this.saveState(state);
     return target;
   }

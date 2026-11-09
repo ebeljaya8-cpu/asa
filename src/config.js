@@ -79,7 +79,28 @@ export const config = {
   // Paths
   dataFile: path.join(__dirname, '..', 'data', 'deployed_tokens.json'),
   dataFileElysium: path.join(__dirname, '..', 'data', 'elysium_deployed_tokens.json'),
+  dataFileBaseDirect: path.join(__dirname, '..', 'data', 'base_direct_deployed_tokens.json'),
   stateFile: path.join(__dirname, '..', 'data', 'bot_state.json'),
+
+  // Base Direct Deploy (Tanpa Clanker) Settings
+  baseDirectDefaultDex: process.env.BASE_DIRECT_DEFAULT_DEX || 'v4',
+  baseDirectDefaultPair: process.env.BASE_DIRECT_DEFAULT_PAIR || 'ETH',
+  baseDirectDefaultLpEth: parseFloat(process.env.BASE_DIRECT_DEFAULT_LP_ETH || '0.0001'),
+  baseDirectDevBuyEth: parseFloat(process.env.BASE_DIRECT_DEV_BUY_ETH || '0.0001'),
+  baseDirectDefaultTotalSupply: process.env.BASE_DIRECT_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
+  baseV4PoolManager: process.env.BASE_V4_POOL_MANAGER || '0x498581fF718922c3f8e6A244956aF099B2652b2b',
+  baseV4PositionManager: process.env.BASE_V4_POSITION_MANAGER || '0x7C5f5A4bBd8fD63184577525326123B519429bDc',
+  basePermit2: process.env.BASE_PERMIT2 || '0x000000000022D473030F116dDEE9F6B43aC78BA3',
+  baseUniversalRouter: process.env.BASE_UNIVERSAL_ROUTER || '0x6fF5693b99212Da76ad316178A184AB56D299b43',
+  baseV3Factory: process.env.BASE_V3_FACTORY || '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
+  baseV3PositionManager: process.env.BASE_V3_POSITION_MANAGER || '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+  baseV3SwapRouter: process.env.BASE_V3_SWAP_ROUTER || '0x2626664c2603336E57B271c5C0b26F421741e481',
+  baseV2Router: process.env.BASE_V2_ROUTER || '0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24',
+  baseV2Factory: process.env.BASE_V2_FACTORY || '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
+  baseWeth: process.env.BASE_WETH || '0x4200000000000000000000000000000000000006',
+  baseUsdc: process.env.BASE_USDC || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  baseExplorer: process.env.BASE_EXPLORER || 'https://basescan.org',
+  baseFeeWallet: process.env.BASE_FEE_WALLET || '',
 
   // Elysium Network Settings
   elysiumRpcUrl: process.env.ELYSIUM_RPC_URL || 'https://rpc.elysium.kinetiq.xyz',

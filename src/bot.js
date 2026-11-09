@@ -9,6 +9,7 @@ import { vestingMonitor } from './vestingMonitor.js';
 import { aiEngine } from './aiEngine.js';
 import { xRadarService } from './xRadarService.js';
 import { elysiumService } from './elysium/elysiumService.js';
+import { baseDeployService } from './base/baseDeployService.js';
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -103,6 +104,13 @@ export class TelegramBotApp {
 • <code>/deploy1</code>, <code>/deploy2</code>, <code>/deploy3</code> - Deploy manual via wallet tertentu
 • <code>/status</code> - Cek saldo ETH 3 wallet & estimasi gas Base
 • <code>/fee [3|5|10]</code> - Atur fee buy & sell token (3%, 5%, 10% Max)
+• <code>/basemenu</code> - Dashboard & Launchpad Base Mandiri (Tanpa Clanker, Chain ID 8453)
+• <code>/basedeploy &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpEth] [Fee%] [ImageUrl]</code> - Deploy mandiri ke Base (+ Uniswap V4 Pool, Pinata IPFS Logo &amp; Anti-Sniper)
+• <code>/basepair [eth|usdc|weth]</code> - Atur trading pair Base (ETH, USDC, WETH)
+• <code>/basedex [v4|v3|v2]</code> - Atur DEX Engine Base (Uniswap V4 Standar / V3 / V2)
+• <code>/baselp [0.0001-0.002]</code> - Atur likuiditas pool awal ETH di Base
+• <code>/basedevbuy [0.0001|off]</code> - Atur dev buy otomatis di Base (0.0001 ETH)
+• <code>/basehistory</code> - Riwayat token deploy mandiri di Base
 • <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
 • <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpHype] [Fee%] [ImageUrl]</code> - Deploy token ke Elysium (+ Uniswap V4 Pool, Pinata IPFS Logo &amp; Verified)
 • <code>/elysiumpair [hype|eth|usdc|weth]</code> - Atur trading pair (HYPE, ETH, USDC, WETH)
@@ -548,6 +556,151 @@ export class TelegramBotApp {
       );
     });
 
+    // /basemenu, /base, /basedirect command
+    bot.command(['basemenu', 'base', 'basedirect'], async (ctx) => {
+      await this.sendBaseDirectMenu(ctx);
+    });
+
+    // /basedeploy, /deploybase, /directbase command
+    bot.command(['basedeploy', 'deploybase', 'directbase'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendBaseDirectDeployMenu(ctx);
+      }
+
+      if (parts.length < 2) {
+        return ctx.replyWithHTML(
+          '⚠️ <b>Format salah!</b>\n\n' +
+          'Gunakan: <code>/basedeploy &lt;NamaToken&gt; &lt;Ticker&gt; [Pair] [LP] [Fee%] [ImageUrl]</code>\n' +
+          '<i>Contoh:</i>\n' +
+          '• <code>/basedeploy BasePepe PEPE</code> (Gunakan default LP & Pair)\n' +
+          '• <code>/basedeploy CyberCat CCAT USDC 0.0001 5 https://assets.coingecko.com/coins/images/placeholder.png</code>\n' +
+          '• <code>/basedeploy SuperAI SUPER ETH 0.0001 5</code>\n\n' +
+          '<i>Logo akan otomatis diunggah ke IPFS via Pinata!</i>\n\n' +
+          'Atau ketik <code>/basedeploy</code> saja untuk membuka panduan & menu preset interaktif.'
+        );
+      }
+
+      const name = parts[0];
+      const symbol = parts[1].toUpperCase();
+
+      let ethLp = String(storage.getBaseDirectLpEth());
+      let pairChoice = storage.getBaseDirectPairToken();
+      let fee = 5;
+      let imageUrl = '';
+
+      const validPairs = ['ETH', 'USDC', 'WETH'];
+
+      for (let i = 2; i < parts.length; i++) {
+        const item = parts[i];
+        if (item.startsWith('http://') || item.startsWith('https://') || item.startsWith('ipfs://')) {
+          imageUrl = item;
+        } else if (validPairs.includes(item.toUpperCase())) {
+          pairChoice = item.toUpperCase();
+        } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0.0001 && parseFloat(item) <= 0.002) {
+          ethLp = item;
+        } else if (!isNaN(parseFloat(item)) && parseFloat(item) > 0 && parseFloat(item) <= 20) {
+          fee = Number(item);
+        }
+      }
+
+      await this.executeDeployBaseDirect(ctx, {
+        name,
+        symbol,
+        imageUrl,
+        pair: pairChoice,
+        ethLiquidity: ethLp,
+        buyFee: fee,
+        sellFee: fee
+      });
+    });
+
+    // /basepair command (set trading pair: ETH, USDC, WETH)
+    bot.command(['basepair', 'setbasepair'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendBaseDirectPairMenu(ctx);
+      }
+      const choice = parts[0].toUpperCase();
+      const valid = ['ETH', 'USDC', 'WETH'];
+      if (!valid.includes(choice)) {
+        return ctx.replyWithHTML(
+          '⚠️ <b>Pilihan pair tidak valid!</b>\n\n' +
+          'Pilihan yang didukung:\n' +
+          '• <code>/basepair ETH</code> (Native Gas ETH - Default)\n' +
+          '• <code>/basepair USDC</code> (USD Coin 0x8335...)\n' +
+          '• <code>/basepair WETH</code> (Wrapped Ether 0x4200...)\n\n' +
+          'Atau ketik <code>/basepair</code> tanpa argumen untuk menu interaktif.'
+        );
+      }
+      storage.setBaseDirectPairToken(choice);
+      await ctx.replyWithHTML(
+        `✅ <b>Trading Pair Base Mandiri berhasil diatur ke: ${choice}!</b>\n\n` +
+        `Deployment token berikutnya di Base akan membuat pool likuiditas berpasangan <b>TOKEN / ${choice}</b>.`
+      );
+    });
+
+    // /basedex command (set DEX version: v4, v3, or v2)
+    bot.command(['basedex', 'setbasedex'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendBaseDirectDexMenu(ctx);
+      }
+      const raw = parts[0].toLowerCase();
+      if (!['v4', 'v3', 'v2'].includes(raw)) {
+        return ctx.replyWithHTML('⚠️ Gunakan <code>/basedex v4</code> (Uniswap V4 - Standar Base), <code>/basedex v3</code>, atau <code>/basedex v2</code>.');
+      }
+      storage.setBaseDirectDexVersion(raw);
+      await ctx.replyWithHTML(`✅ <b>DEX Engine Base Mandiri berhasil diatur ke: Uniswap ${raw.toUpperCase()}!</b>`);
+    });
+
+    // /baselp command (set LP ETH)
+    bot.command(['baselp', 'setbaselp'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendBaseDirectLpMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0.0001 || val > 0.002) {
+        return ctx.replyWithHTML(
+          '⚠️ <b>Nilai LP ETH harus berada di antara 0.0001 dan 0.002 ETH!</b>\n\n' +
+          '<i>Contoh:</i> <code>/baselp 0.0001</code> atau <code>/baselp 0.0002</code>'
+        );
+      }
+      storage.setBaseDirectLpEth(val);
+      await ctx.replyWithHTML(
+        `✅ <b>Likuiditas Pool (LP) Base Mandiri berhasil diatur ke: ${val} ETH!</b>\n\n` +
+        `Setiap deployment token di Base akan menyetor likuiditas awal sebesar <b>${val} ETH</b>.`
+      );
+    });
+
+    // /basedevbuy command (set Dev Buy ETH)
+    bot.command(['basedevbuy', 'devbuybase'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendBaseDirectLpMenu(ctx);
+      }
+      const raw = parts[0].toLowerCase();
+      if (raw === 'off' || raw === '0') {
+        storage.setBaseDirectDevBuyEth(0);
+        return ctx.replyWithHTML('🔴 <b>Dev Buy Otomatis di Base Mandiri dinonaktifkan (0 ETH)!</b>');
+      }
+      const val = parseFloat(raw);
+      if (isNaN(val) || val <= 0) {
+        return ctx.replyWithHTML('⚠️ Masukkan nominal Dev Buy ETH yang valid (misal: <code>/basedevbuy 0.0001</code>).');
+      }
+      storage.setBaseDirectDevBuyEth(val);
+      await ctx.replyWithHTML(
+        `✅ <b>Dev Buy Otomatis di Base Mandiri berhasil diatur ke: ${val} ETH!</b>\n\n` +
+        `Deployer akan otomatis membeli token sebesar <b>${val} ETH</b> sesaat setelah trading dibuka.`
+      );
+    });
+
+    // /basehistory command
+    bot.command(['basehistory', 'directhistory'], async (ctx) => {
+      await this.sendBaseDirectHistory(ctx);
+    });
+
     // Action Handlers
     bot.action('cmd_start_menu', async (ctx) => {
       await ctx.answerCbQuery();
@@ -953,6 +1106,100 @@ export class TelegramBotApp {
       });
     });
 
+    // Base Direct Deploy (Mandiri Tanpa Clanker) Action Handlers
+    bot.action('cmd_base_direct_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendBaseDirectMenu(ctx, true);
+    });
+
+    bot.action('cmd_base_direct_deploy_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendBaseDirectDeployMenu(ctx);
+    });
+
+    bot.action('cmd_base_direct_history', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendBaseDirectHistory(ctx);
+    });
+
+    bot.action('cmd_base_direct_lp_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendBaseDirectLpMenu(ctx);
+    });
+
+    bot.action(/^set_base_lp_([0-9\.]+)$/, async (ctx) => {
+      const val = parseFloat(ctx.match[1]);
+      storage.setBaseDirectLpEth(val);
+      await ctx.answerCbQuery(`LP ETH diatur ke ${val} ETH!`).catch(() => {});
+      await this.sendBaseDirectLpMenu(ctx, true);
+    });
+
+    bot.action(/^set_base_devbuy_([0-9\.]+|off)$/, async (ctx) => {
+      const raw = ctx.match[1];
+      const val = raw === 'off' ? 0 : parseFloat(raw);
+      storage.setBaseDirectDevBuyEth(val);
+      await ctx.answerCbQuery(val > 0 ? `Dev Buy diatur ke ${val} ETH!` : 'Dev Buy dinonaktifkan!').catch(() => {});
+      await this.sendBaseDirectLpMenu(ctx, true);
+    });
+
+    bot.action('cmd_base_direct_pair_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendBaseDirectPairMenu(ctx);
+    });
+
+    bot.action(/^set_base_pair_([A-Za-z0-9_]+)$/, async (ctx) => {
+      const pair = ctx.match[1].toUpperCase();
+      storage.setBaseDirectPairToken(pair);
+      await ctx.answerCbQuery(`Trading Pair diatur ke ${pair}!`).catch(() => {});
+      await this.sendBaseDirectPairMenu(ctx, true);
+    });
+
+    bot.action('cmd_base_direct_dex_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendBaseDirectDexMenu(ctx);
+    });
+
+    bot.action(/^set_base_dex_([A-Za-z0-9_]+)$/, async (ctx) => {
+      const dex = ctx.match[1].toLowerCase();
+      storage.setBaseDirectDexVersion(dex);
+      await ctx.answerCbQuery(`DEX diatur ke Uniswap ${dex.toUpperCase()}!`).catch(() => {});
+      await this.sendBaseDirectDexMenu(ctx, true);
+    });
+
+    bot.action('cmd_base_direct_quick_demo', async (ctx) => {
+      await ctx.answerCbQuery('Memulai Quick Deploy Token Demo Base...').catch(() => {});
+      const randomTag = Math.floor(100 + Math.random() * 900);
+      const curLp = storage.getBaseDirectLpEth();
+      await this.executeDeployBaseDirect(ctx, {
+        name: `Base Gem ${randomTag}`,
+        symbol: `GEM${randomTag}`,
+        imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
+        ethLiquidity: String(curLp),
+        buyFee: 5,
+        sellFee: 5
+      });
+    });
+
+    bot.action(/^d_basedir_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy mandiri ke Base...').catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      let targetToken = this.trendingCache ? this.trendingCache[idx] : null;
+
+      if (!targetToken) {
+        return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending lagi.');
+      }
+
+      const curLp = storage.getBaseDirectLpEth();
+      await this.executeDeployBaseDirect(ctx, {
+        name: targetToken.name,
+        symbol: targetToken.symbol,
+        imageUrl: targetToken.imageUrl,
+        ethLiquidity: String(curLp),
+        buyFee: 5,
+        sellFee: 5
+      });
+    });
+
     // Dynamic Deploy Button Action with short callback data (safe < 64 bytes)
     // DEPLOYS ACROSS ALL WALLETS SIMULTANEOUSLY!
     bot.action(/^d_idx_(\d+)$/, async (ctx) => {
@@ -1073,7 +1320,8 @@ ${walletsOverview}
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('🪐 Elysium Hub & Deploy (Chain 99901)', 'cmd_elysium_menu')
+        Markup.button.callback('⚡ Base Direct Hub (Mandiri)', 'cmd_base_direct_menu'),
+        Markup.button.callback('🪐 Elysium Hub & Deploy', 'cmd_elysium_menu')
       ],
       [
         Markup.button.callback('👛 Kelola 3 Wallet Terpisah', 'cmd_wallets_menu'),
@@ -1688,10 +1936,16 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         const buttons = [];
         if (category === 'elysium' || category === 'elys' || token.sourceNetwork?.toLowerCase() === 'elysium') {
           buttons.push([Markup.button.callback(`🪐 Deploy ke Elysium Mainnet`, `d_elys_${index}`)]);
-          buttons.push([Markup.button.callback(`🚀 Deploy ke Base (Semua Wallet)`, `d_idx_${index}`)]);
+          buttons.push([
+            Markup.button.callback(`⚡ Deploy Mandiri (Base)`, `d_basedir_${index}`),
+            Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
+          ]);
         } else {
           buttons.push([
-            Markup.button.callback(`🚀 Deploy ke Base`, `d_idx_${index}`),
+            Markup.button.callback(`⚡ Deploy Mandiri (Base)`, `d_basedir_${index}`),
+            Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
+          ]);
+          buttons.push([
             Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`)
           ]);
         }
@@ -2665,6 +2919,426 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
         Markup.inlineKeyboard([
           [Markup.button.callback('🔄 Coba Lagi', 'cmd_elysium_deploy_menu')],
           [Markup.button.callback('🪐 Dashboard Elysium', 'cmd_elysium_menu')]
+        ])
+      );
+    }
+  }
+
+  async sendBaseDirectMenu(ctx, isEdit = false) {
+    const info = await baseDeployService.getDeployerInfo();
+    const deployedTokens = storage.getBaseDirectDeployedTokens();
+    const totalCount = deployedTokens.length;
+    const curLp = storage.getBaseDirectLpEth();
+    const curDevBuy = storage.getBaseDirectDevBuyEth();
+    const curPair = storage.getBaseDirectPairToken();
+    const curDex = storage.getBaseDirectDexVersion().toUpperCase();
+    const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} ETH</b>` : '🔴 <i>Nonaktif (0 ETH)</i>';
+
+    const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
+    const balanceEthDisplay = info.balanceEth !== 'Error RPC' ? `<b>${parseFloat(info.balanceEth).toFixed(6)} ETH</b>` : '⚠️ Gagal cek saldo';
+    const balanceUsdcDisplay = `<b>${parseFloat(info.balanceUsdc || 0).toFixed(4)} USDC</b>`;
+    const gasDisplay = `<code>${info.gasPriceGwei} Gwei</code>`;
+
+    const dexBadge = curDex === 'V4' ? '✨ <b>Uniswap V4 (Standar Utama & Aktif)</b>' : (curDex === 'V3' ? '🦄 <b>Uniswap V3</b>' : '🥞 <b>Uniswap V2</b>');
+    const pairBadge = curPair === 'USDC' ? '💵 <b>TOKEN / USDC (Stablecoin)</b>' : (curPair === 'WETH' ? '📦 <b>TOKEN / WETH (Wrapped)</b>' : '💎 <b>TOKEN / ETH (Native Gas)</b>');
+
+    const msg = 
+`⚡ <b>BASE DIRECT LAUNCHPAD - MANDIRI TANPA CLANKER (CHAIN ID 8453)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pusat deploy & kelola token mandiri di Base Network dengan Uniswap V4/V3/V2 tanpa limitasi Clanker!
+
+👛 <b>INFO DEPLOYER WALLET:</b>
+• Alamat: ${addrDisplay}
+• Saldo Gas (ETH): ${balanceEthDisplay}
+• Saldo USDC: ${balanceUsdcDisplay}
+• Estimasi Gas Base: ${gasDisplay}
+• PoolManager V4: <code>${info.v4PoolManager}</code>
+• Position Manager V4: <code>${info.v4PositionManager}</code>
+• Universal Router: <code>${info.universalRouter}</code>
+
+⚙️ <b>SETTING TRADING & LIQUIDITY:</b>
+• DEX Engine: ${dexBadge}
+• Trading Pair: ${pairBadge}
+• Likuiditas Pool (LP): <b>${curLp} ETH / Quote</b>
+• Dev Buy Otomatis: ${devBuyText}
+• Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
+• Fee Default: <b>5% Buy / 5% Sell</b> ke Deployer Wallet
+• Total Token Dideploy: <b>${totalCount} token</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Pilih aksi di bawah:</i>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🚀 Deploy Token Baru ke Base', 'cmd_base_direct_deploy_menu'),
+        Markup.button.callback('🔥 Trending Base Tokens', 'cmd_trending_base')
+      ],
+      [
+        Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_base_direct_pair_menu'),
+        Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_base_direct_dex_menu')
+      ],
+      [
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_base_direct_lp_menu'),
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_base_direct_history')
+      ],
+      [
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_base_direct_menu'),
+        Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendBaseDirectPairMenu(ctx, isEdit = false) {
+    const curPair = storage.getBaseDirectPairToken();
+    const curDex = storage.getBaseDirectDexVersion().toUpperCase();
+    const check = (val) => curPair === val ? '✅ ' : '';
+
+    const msg =
+`🔄 <b>PENGATURAN TRADING PAIR BASE MANDIRI (${curDex})</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pilih quote token pasangan likuiditas yang akan digunakan saat deploy token mandiri di Base Network:
+
+💎 <b>ETH (Native Gas):</b> Pasangan default native coin Base. Di Uniswap V4 disetor langsung sebagai native gas tanpa wrap ke WETH!
+💵 <b>USDC:</b> Pasangan stablecoin USD Coin (<code>0x8335...</code>). Jika saldo USDC deployer kosong, bot otomatis menukar sebagian kecil ETH ke USDC!
+📦 <b>WETH:</b> Pasangan Wrapped Ether (<code>0x4200...</code>).
+
+🎯 <b>Setting Pair Aktif:</b> <b>${curPair}</b>
+
+<i>Pilih pair di bawah atau gunakan:</i> <code>/basepair [eth|usdc|weth]</code>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${check('ETH')}💎 ETH (Native Gas - Default)`, 'set_base_pair_ETH'),
+        Markup.button.callback(`${check('USDC')}💵 USDC (USD Coin 6 Dec)`, 'set_base_pair_USDC')
+      ],
+      [
+        Markup.button.callback(`${check('WETH')}📦 WETH (Wrapped Ether)`, 'set_base_pair_WETH'),
+        Markup.button.callback('✨ Ganti DEX Engine', 'cmd_base_direct_dex_menu')
+      ],
+      [
+        Markup.button.callback('⚡ Kembali ke Menu Base Mandiri', 'cmd_base_direct_menu'),
+        Markup.button.callback('⬅️ Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendBaseDirectDexMenu(ctx, isEdit = false) {
+    const curDex = storage.getBaseDirectDexVersion();
+    const check = (val) => curDex === val ? '✅ ' : '';
+
+    const msg =
+`🦄 <b>PENGATURAN DEX ENGINE BASE MANDIRI</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pilih versi protokol DEX yang digunakan untuk membuat pool likuiditas & dev buy di Base Network:
+
+✨ <b>Uniswap V4 (Default & Standar Base Terupdate):</b>
+• Singleton PoolManager & Position NFT (UNI-V4-POSM)
+• Dukungan Native Gas ETH langsung (address 0)
+• UniversalRouter eksekusi swap berkecepatan tinggi
+
+🦄 <b>Uniswap V3:</b>
+• NonfungiblePositionManager NFT
+• Concentrated / Full-Range Liquidity
+• SwapRouter Single-Hop & Multi-Hop
+
+🥞 <b>Uniswap V2 (Fallback Klasik):</b>
+• Router V2 addLiquidityETH
+• AMM x*y=k konvensional
+
+🎯 <b>DEX Aktif Saat Ini:</b> <b>Uniswap ${curDex.toUpperCase()}</b>
+
+<i>Pilih DEX di bawah atau gunakan:</i> <code>/basedex [v4|v3|v2]</code>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${check('v4')}✨ Uniswap V4 (Standar Utama & Aktif)`, 'set_base_dex_v4'),
+        Markup.button.callback(`${check('v3')}🦄 Uniswap V3`, 'set_base_dex_v3')
+      ],
+      [
+        Markup.button.callback(`${check('v2')}🥞 Uniswap V2 (Legacy)`, 'set_base_dex_v2'),
+        Markup.button.callback('🔄 Atur Trading Pair', 'cmd_base_direct_pair_menu')
+      ],
+      [
+        Markup.button.callback('⚡ Kembali ke Menu Base Mandiri', 'cmd_base_direct_menu'),
+        Markup.button.callback('⬅️ Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendBaseDirectLpMenu(ctx, isEdit = false) {
+    const curLp = storage.getBaseDirectLpEth();
+    const curDevBuy = storage.getBaseDirectDevBuyEth();
+    const curPair = storage.getBaseDirectPairToken();
+    const curDex = storage.getBaseDirectDexVersion().toUpperCase();
+    const devBuyLabel = curDevBuy > 0 ? `🟢 ${curDevBuy} ETH` : '🔴 Nonaktif (0 ETH)';
+
+    const msg = 
+`⚙️ <b>PENGATURAN LIKUIDITAS (LP) &amp; DEV BUY BASE MANDIRI</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex} (Pair: ${curPair}) dan nominal Dev Buy otomatis saat peluncuran token di Base Mainnet:
+
+💧 <b>Setting LP Saat Ini:</b> <code>${curLp} ETH / Quote</code>
+🛒 <b>Setting Dev Buy Saat Ini:</b> <code>${devBuyLabel}</code>
+💡 <b>Rentang LP yang Diizinkan:</b> <code>0.0001</code> s/d <code>0.002 ETH</code>
+
+<i>Pilih nilai cepat di bawah atau gunakan perintah chat:</i>
+• <code>/baselp 0.0001</code> s/d <code>/baselp 0.002</code>
+• <code>/basedevbuy 0.0001</code> (atau <code>/basedevbuy off</code>)`;
+
+    const checkLp = (val) => Number(curLp) === Number(val) ? '✅ ' : '';
+    const checkDevBuy = (val) => Number(curDevBuy) === Number(val) ? '✅ ' : '';
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${checkLp(0.0001)}0.0001 ETH (Min)`, 'set_base_lp_0.0001'),
+        Markup.button.callback(`${checkLp(0.00015)}0.00015 ETH`, 'set_base_lp_0.00015')
+      ],
+      [
+        Markup.button.callback(`${checkLp(0.0002)}0.0002 ETH`, 'set_base_lp_0.0002'),
+        Markup.button.callback(`${checkLp(0.0005)}0.0005 ETH`, 'set_base_lp_0.0005')
+      ],
+      [
+        Markup.button.callback(`${checkLp(0.001)}0.001 ETH`, 'set_base_lp_0.001')
+      ],
+      [
+        Markup.button.callback(`${checkDevBuy(0.0001)}🛒 Dev Buy: 0.0001 ETH`, 'set_base_devbuy_0.0001'),
+        Markup.button.callback(`${curDevBuy === 0 ? '✅ ' : ''}❌ Dev Buy: OFF`, 'set_base_devbuy_off')
+      ],
+      [
+        Markup.button.callback('🔄 Ubah Trading Pair', 'cmd_base_direct_pair_menu'),
+        Markup.button.callback('⚡ Menu Base Mandiri', 'cmd_base_direct_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendBaseDirectDeployMenu(ctx) {
+    const info = await baseDeployService.getDeployerInfo();
+    const balNum = parseFloat(info.balanceEth) || 0;
+    const curLp = storage.getBaseDirectLpEth();
+    const curDevBuy = storage.getBaseDirectDevBuyEth();
+    const curPair = storage.getBaseDirectPairToken();
+    const curDex = storage.getBaseDirectDexVersion().toUpperCase();
+
+    const msg = 
+`🚀 <b>PANEL DEPLOY TOKEN MANDIRI KE BASE MAINNET</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Saldo Deployer: <b>${balNum.toFixed(6)} ETH</b> | <b>${parseFloat(info.balanceUsdc || 0).toFixed(4)} USDC</b>
+• DEX Engine: <b>Uniswap ${curDex}</b>
+• Trading Pair: <b>${curPair}</b>
+• Likuiditas (LP): <b>${curLp} ETH / Quote</b>
+• Setting Dev Buy: <b>${curDevBuy > 0 ? `${curDevBuy} ETH` : 'Nonaktif'}</b>
+
+💡 <b>Cara Deploy:</b>
+1️⃣ <b>Gunakan Perintah Cepat di Chat:</b>
+<code>/basedeploy &lt;Nama&gt; &lt;Ticker&gt; [LP] [Pair] [Fee%]</code>
+<i>Contoh:</i>
+• <code>/basedeploy BasePepe PEPE</code> (Gunakan setting aktif)
+• <code>/basedeploy CyberCat CCAT ${curLp} USDC 5</code>
+• <code>/basedeploy RoboBase ROBO ${curLp} ETH 5</code>
+
+2️⃣ <b>Atau Pilih Preset di Bawah:</b>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`⚡ Quick Deploy Token Demo Base (${curPair})`, 'cmd_base_direct_quick_demo')
+      ],
+      [
+        Markup.button.callback(`🔄 Ganti Pair (${curPair})`, 'cmd_base_direct_pair_menu'),
+        Markup.button.callback(`🦄 Ganti DEX (${curDex})`, 'cmd_base_direct_dex_menu')
+      ],
+      [
+        Markup.button.callback('⚙️ Ubah Setting LP & Dev Buy', 'cmd_base_direct_lp_menu'),
+        Markup.button.callback('🔥 Radar Trending Base', 'cmd_trending_base')
+      ],
+      [
+        Markup.button.callback('⬅️ Kembali ke Menu Base Mandiri', 'cmd_base_direct_menu')
+      ]
+    ]);
+
+    await ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendBaseDirectHistory(ctx) {
+    const tokens = storage.getBaseDirectDeployedTokens();
+    if (!tokens || tokens.length === 0) {
+      return ctx.replyWithHTML(
+        '📜 <b>Belum ada riwayat token yang dideploy mandiri di Base.</b>\n\n' +
+        'Gunakan perintah <code>/basedeploy &lt;Nama&gt; &lt;Ticker&gt;</code> untuk mulai mendeploy.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 Deploy Token Sekarang', 'cmd_base_direct_deploy_menu')],
+          [Markup.button.callback('⬅️ Menu Base Mandiri', 'cmd_base_direct_menu')]
+        ])
+      );
+    }
+
+    let text = `📜 <b>RIWAYAT DEPLOYMENT MANDIRI BASE MAINNET (${tokens.length} Token Terakhir):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    for (const [i, t] of tokens.slice(0, 5).entries()) {
+      const dexLabel = t.dexVersion || 'Uniswap V4';
+      const pairLabel = t.pairToken || 'ETH';
+      text += 
+`<b>#${i + 1} 🪙 ${escapeHtml(t.name)} ($${escapeHtml(t.symbol)})</b>
+• DEX &amp; Pair: <b>${dexLabel}</b> (Pair: <code>${pairLabel}</code>)
+• Kontrak: <code>${t.tokenAddress}</code>
+• Pool: <code>${t.poolAddress || 'N/A'}</code> ${t.positionTokenId ? `(NFT #${t.positionTokenId})` : ''}
+• LP: <b>${t.quoteDeposited || `${t.ethDeposited} ETH`}</b> + <b>${t.tokenDeposited} Token</b>
+• Waktu: <i>${new Date(t.deployedAt).toLocaleString('id-ID')}</i>
+• Link: <a href="${t.explorerUrl}">Basescan</a> | <a href="${t.dexscreenerUrl}">DexScreener</a>${t.imageUrl ? ` | <a href="${toHttpImageUrl(t.imageUrl)}">Logo</a>` : ''}
+──────────────────────────\n`;
+    }
+
+    await ctx.replyWithHTML(text, Markup.inlineKeyboard([
+      [Markup.button.callback('🚀 Deploy Token Baru', 'cmd_base_direct_deploy_menu')],
+      [Markup.button.callback('⬅️ Menu Base Mandiri', 'cmd_base_direct_menu')]
+    ]));
+  }
+
+  async executeDeployBaseDirect(ctx, options = {}) {
+    const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || '0.0001');
+    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.0001'));
+    const pairChoice = options.pair || storage.getBaseDirectPairToken() || 'ETH';
+    const dexVersion = options.dexVersion || storage.getBaseDirectDexVersion() || 'v4';
+    const dexName = dexVersion.toLowerCase() === 'v4' ? 'Uniswap V4' : (dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2');
+
+    const initialMsg = await ctx.replyWithHTML(
+      `⚡ <b>MEMULAI DEPLOYMENT MANDIRI KE BASE MAINNET (CHAIN ID 8453)</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+      `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
+      `• DEX Engine: <b>${dexName}</b>\n` +
+      `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
+      `• Likuiditas Pool: <b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
+      `• Dev Buy Otomatis: <b>${Number(devBuyEth) > 0 ? `${devBuyEth} ETH` : 'Nonaktif'}</b>\n` +
+      `• Fee: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>\n` +
+      `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
+      `⏳ <i>Langkah 1/9: Memeriksa saldo ETH, quote token, &amp; parameter on-chain...</i>`
+    );
+
+    const progressUpdates = async (step, msg) => {
+      try {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          initialMsg.message_id,
+          null,
+          `⚡ <b>DEPLOYMENT MANDIRI KE BASE MAINNET (CHAIN ID 8453)</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+          `• DEX &amp; Pair: <b>${dexName}</b> (Pair: <code>${pairChoice}</code>)\n` +
+          `• Status: <b>Langkah ${step}/9</b>\n\n` +
+          `⏳ <i>${escapeHtml(msg)}</i>`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+    };
+
+    try {
+      const deployOptions = {
+        ...options,
+        pair: pairChoice,
+        dexVersion,
+        ethLiquidity: ethLp,
+        devBuyEth
+      };
+      const result = await baseDeployService.deployToken(deployOptions, progressUpdates);
+
+      const summaryMsg = 
+`🎉 <b>TOKEN BERHASIL DIDEPLOY &amp; LIVE DI BASE MAINNET!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Info Token:</b>
+• Nama: <b>${escapeHtml(result.token.name)}</b>
+• Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
+• Kontrak Token: <code>${result.token.address}</code>
+• Logo IPFS/URL: <a href="${toHttpImageUrl(result.token?.imageUrl || options.imageUrl)}">Lihat Gambar Logo</a>
+• Total Supply: <b>100.000.000.000 (100B)</b>
+• Platform: <b>Direct Launchpad (Mandiri Tanpa Clanker)</b>
+
+💧 <b>${result.dexVersion} Pool &amp; Likuiditas:</b>
+• Trading Pair: <b>TOKEN / ${result.pairToken}</b>
+• Alamat Pool (Pair): <code>${result.liquidity.poolAddress}</code>
+${result.positionTokenId ? `• Position NFT: <b>${result.dexVersion} Position #${result.positionTokenId}</b>\n` : ''}• Likuiditas Awal: <b>${result.liquidity.quoteDeposited}</b> + <b>${result.liquidity.tokensDeposited}</b>
+• Dev Buy Otomatis: <b>${result.liquidity.devBuyEth}</b>
+• Harga Awal: <code>${result.liquidity.initialPrice} ${result.pairToken}</code>
+• Trading: <b>🟢 AKTIF (Bisa dibeli &amp; dijual langsung!)</b>
+
+🛡️ <b>Proteksi &amp; Pajak:</b>
+• Sniper Tax: <b>80% Buy Tax (30 Menit Pertama)</b>
+• Normal Tax: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>
+
+🔗 <b>Transaction Hashes:</b>
+• Deploy Token: <a href="${result.urls.tokenExplorer}">${result.token.deployTxHash.slice(0, 14)}...</a>
+• Add Liquidity: <code>${result.liquidity.addLiquidityTxHash.slice(0, 14)}...</code>
+• Enable Trading: <code>${result.liquidity.enableTradingTxHash.slice(0, 14)}...</code>
+${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devBuyTxHash.slice(0, 14)}...</code>\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Klik tautan di bawah untuk melihat di Explorer &amp; Dex:</i>`;
+
+      const buttons = [
+        [
+          Markup.button.url('🔍 Lihat di Basescan', result.urls.tokenExplorer),
+          Markup.button.url('📊 DexScreener', result.urls.dexscreener)
+        ],
+        [
+          Markup.button.url('🦎 GeckoTerminal', result.urls.geckoterminal),
+          Markup.button.url('💧 Lihat Pool di Explorer', result.urls.poolExplorer)
+        ],
+        [
+          Markup.button.callback('⚡ Dashboard Base Mandiri', 'cmd_base_direct_menu'),
+          Markup.button.callback('⬅️ Menu Utama', 'cmd_start_menu')
+        ]
+      ];
+
+      const rawLogo = result.token?.imageUrl || options.imageUrl || result.imageUrl;
+      const photoUrl = toHttpImageUrl(rawLogo);
+
+      if (photoUrl && photoUrl.startsWith('http')) {
+        try {
+          await ctx.replyWithPhoto(photoUrl, {
+            caption: summaryMsg,
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard(buttons)
+          });
+        } catch (photoErr) {
+          console.warn('[BaseDirectBot] replyWithPhoto failed, fallback to replyWithHTML:', photoErr.message);
+          await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+        }
+      } else {
+        await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+      }
+    } catch (err) {
+      console.error('Error during Base Direct deploy:', err);
+      await ctx.replyWithHTML(
+        `❌ <b>Deployment Mandiri ke Base Gagal!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Error: <code>${escapeHtml(err.message)}</code>\n\n` +
+        `💡 <i>Pastikan saldo ETH di wallet deployer Base mencukupi untuk LP + gas, dan coba lagi.</i>`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Coba Lagi', 'cmd_base_direct_deploy_menu')],
+          [Markup.button.callback('⚡ Dashboard Base Mandiri', 'cmd_base_direct_menu')]
         ])
       );
     }
