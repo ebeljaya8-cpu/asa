@@ -109,7 +109,7 @@ export class TelegramBotApp {
 • <code>/basepair [eth|usdc|weth]</code> - Atur trading pair Base (ETH, USDC, WETH)
 • <code>/basedex [v4|v3|v2]</code> - Atur DEX Engine Base (Uniswap V4 Standar / V3 / V2)
 • <code>/baselp [0.00001-0.002]</code> - Atur likuiditas pool awal ETH di Base (default: 0.00001 ETH)
-• <code>/basedevbuy [0.0001|off]</code> - Atur dev buy otomatis di Base (0.0001 ETH)
+• <code>/basedevbuy [0.000001|off]</code> - Atur dev buy otomatis di Base (default: 0.000001 ETH)
 • <code>/basehistory</code> - Riwayat token deploy mandiri di Base
 • <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
 • <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpHype] [Fee%] [ImageUrl]</code> - Deploy token ke Elysium (+ Uniswap V4 Pool, Pinata IPFS Logo &amp; Verified)
@@ -687,7 +687,7 @@ export class TelegramBotApp {
       }
       const val = parseFloat(raw);
       if (isNaN(val) || val <= 0) {
-        return ctx.replyWithHTML('⚠️ Masukkan nominal Dev Buy ETH yang valid (misal: <code>/basedevbuy 0.0001</code>).');
+        return ctx.replyWithHTML('⚠️ Masukkan nominal Dev Buy ETH yang valid (misal: <code>/basedevbuy 0.000001</code>).');
       }
       storage.setBaseDirectDevBuyEth(val);
       await ctx.replyWithHTML(
@@ -3103,7 +3103,7 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
 
 <i>Pilih nilai cepat di bawah atau gunakan perintah chat:</i>
 • <code>/baselp 0.00001</code> s/d <code>/baselp 0.002</code>
-• <code>/basedevbuy 0.0001</code> (atau <code>/basedevbuy off</code>)`;
+• <code>/basedevbuy 0.000001</code> (atau <code>/basedevbuy off</code>)`;
 
     const checkLp = (val) => Number(curLp) === Number(val) ? '✅ ' : '';
     const checkDevBuy = (val) => Number(curDevBuy) === Number(val) ? '✅ ' : '';
@@ -3122,7 +3122,11 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
         Markup.button.callback(`${checkLp(0.001)}0.001 ETH`, 'set_base_lp_0.001')
       ],
       [
-        Markup.button.callback(`${checkDevBuy(0.0001)}🛒 Dev Buy: 0.0001 ETH`, 'set_base_devbuy_0.0001'),
+        Markup.button.callback(`${checkDevBuy(0.000001)}🛒 Dev Buy: 0.000001 ETH (Min & Default)`, 'set_base_devbuy_0.000001'),
+        Markup.button.callback(`${checkDevBuy(0.00001)}🛒 0.00001 ETH`, 'set_base_devbuy_0.00001')
+      ],
+      [
+        Markup.button.callback(`${checkDevBuy(0.0001)}🛒 0.0001 ETH`, 'set_base_devbuy_0.0001'),
         Markup.button.callback(`${curDevBuy === 0 ? '✅ ' : ''}❌ Dev Buy: OFF`, 'set_base_devbuy_off')
       ],
       [
@@ -3222,7 +3226,7 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
 
   async executeDeployBaseDirect(ctx, options = {}) {
     const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || '0.00001');
-    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.0001'));
+    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.000001'));
     const pairChoice = options.pair || storage.getBaseDirectPairToken() || 'ETH';
     const dexVersion = options.dexVersion || storage.getBaseDirectDexVersion() || 'v4';
     const dexName = dexVersion.toLowerCase() === 'v4' ? 'Uniswap V4' : (dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2');

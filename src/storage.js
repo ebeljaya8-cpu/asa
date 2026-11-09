@@ -221,9 +221,9 @@ export class Storage {
       sellFee: record.sellFee || 5,
       dexVersion: record.dexVersion || 'Uniswap V4',
       pairToken: record.pairToken || 'ETH',
-      quoteDeposited: record.quoteDeposited || record.ethDeposited || '0.0001',
-      ethDeposited: record.ethDeposited || '0.0001',
-      devBuyEth: record.devBuyEth || '0.0001',
+      quoteDeposited: record.quoteDeposited || record.ethDeposited || '0.00001',
+      ethDeposited: record.ethDeposited || '0.00001',
+      devBuyEth: record.devBuyEth || '0.000001',
       tokenDeposited: record.tokenDeposited || '20000000000',
       initialPriceEth: record.initialPriceEth || 0,
       positionTokenId: record.positionTokenId || null,
@@ -546,7 +546,7 @@ export class Storage {
 
   getBaseDirectDevBuyEth() {
     const state = this.getState();
-    return state.baseDirectDevBuyEth !== undefined ? state.baseDirectDevBuyEth : (config.baseDirectDevBuyEth || 0.0001);
+    return state.baseDirectDevBuyEth !== undefined ? state.baseDirectDevBuyEth : (config.baseDirectDevBuyEth || 0.000001);
   }
 
   setBaseDirectDevBuyEth(amount) {

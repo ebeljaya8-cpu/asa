@@ -349,7 +349,7 @@ export class BaseDeployService {
     const feeTier = Number(options.feeTier || storage.getBaseDirectV3FeeTier() || 10000);
 
     const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || config.baseDirectDefaultLpEth || '0.00001');
-    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.0001'));
+    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.000001'));
     const ethLpWei = ethers.parseEther(ethLp);
     const devBuyWei = ethers.parseEther(devBuyEth);
     const gasReserveWei = ethers.parseEther('0.0001'); // Gas reserve on Base L2 (~0.01 Gwei)
