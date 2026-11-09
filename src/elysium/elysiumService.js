@@ -19,6 +19,7 @@ const ROUTER_ABI = [
   'function factory() external pure returns (address)',
   'function WETH() external pure returns (address)',
   'function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)',
+  'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
   'function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)'
 ];
 
@@ -168,15 +169,17 @@ export class ElysiumService {
 
     notify(1, 'Memeriksa saldo HYPE dan kesiapan jaringan Elysium...');
     const balance = await this.provider.getBalance(wallet.address);
-    const hypeLp = String(options.hypeLiquidity || config.elysiumDefaultLpHype || '0.01');
+    const hypeLp = String(options.hypeLiquidity || storage.getElysiumLpHype() || config.elysiumDefaultLpHype || '0.0001');
+    const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0.0001'));
     const hypeLpWei = ethers.parseEther(hypeLp);
-    const gasReserveWei = ethers.parseEther('0.003'); // Cadangan gas
-    const totalRequiredWei = hypeLpWei + gasReserveWei;
+    const devBuyWei = ethers.parseEther(devBuyHype);
+    const gasReserveWei = ethers.parseEther('0.0005'); // Minimal cadangan gas Elysium (~0.1 Gwei)
+    const totalRequiredWei = hypeLpWei + devBuyWei + gasReserveWei;
 
     if (balance < totalRequiredWei) {
       const curHype = ethers.formatEther(balance);
       const reqHype = ethers.formatEther(totalRequiredWei);
-      throw new Error(`Saldo HYPE tidak mencukupi! Anda memiliki ${curHype} HYPE, dibutuhkan minimal ${reqHype} HYPE (LP ${hypeLp} HYPE + gas).`);
+      throw new Error(`Saldo HYPE tidak mencukupi! Anda memiliki ${curHype} HYPE, dibutuhkan minimal ${reqHype} HYPE (LP ${hypeLp} HYPE + Dev Buy ${devBuyHype} HYPE + gas).`);
     }
 
     const name = (options.name || 'Elysium Token').trim();
@@ -314,14 +317,37 @@ export class ElysiumService {
     const enableTradingTxHash = enableTradingTx.hash;
     notify(7, `Trading telah AKTIF dan bisa ditradingkan! Tx: ${enableTradingTxHash}`);
 
+    // Step 7: Dev Buy
+    let devBuyTxHash = '';
+    if (devBuyWei > 0n) {
+      notify(8, `Menjalankan Dev Buy sebesar ${devBuyHype} HYPE via Uniswap V2...`);
+      try {
+        const path = [wethAddress, tokenAddress];
+        const devBuyDeadline = Math.floor(Date.now() / 1000) + 600;
+        const devBuyTx = await router.swapExactETHForTokens(
+          0,
+          path,
+          wallet.address,
+          devBuyDeadline,
+          { value: devBuyWei }
+        );
+        await devBuyTx.wait();
+        devBuyTxHash = devBuyTx.hash;
+        notify(8, `Dev Buy sebesar ${devBuyHype} HYPE berhasil dieksekusi! Tx: ${devBuyTxHash}`);
+      } catch (buyErr) {
+        console.warn('Dev Buy failed to execute:', buyErr.message);
+        notify(8, `Peringatan Dev Buy: ${buyErr.message}`);
+      }
+    }
+
     // Calculate Initial Price
     const initialPriceHype = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
 
-    // Step 7: Verifikasi Kontrak di Elyscan (Async)
+    // Step 8: Verifikasi Kontrak di Elyscan (Async)
     let isTokenVerified = false;
     let isLockVerified = false;
     if (options.autoVerify !== false) {
-      notify(8, 'Melakukan verifikasi kontrak di explorer Elyscan...');
+      notify(9, 'Melakukan verifikasi kontrak di explorer Elyscan...');
       try {
         const verifyTokenRes = await this.verifyContractOnElyscan(
           tokenAddress,
@@ -356,6 +382,7 @@ export class ElysiumService {
       buyFee,
       sellFee,
       hypeDeposited: hypeLp,
+      devBuyHype: devBuyHype,
       tokenDeposited: ethers.formatUnits(tokenLp, 18),
       initialPriceHype,
       deployTx: deployTxHash,
@@ -363,6 +390,7 @@ export class ElysiumService {
       addLiquidityTx: addLiquidityTxHash,
       setPairTx: setPairTxHash,
       enableTradingTx: enableTradingTxHash,
+      devBuyTx: devBuyTxHash,
       isVerified: isTokenVerified
     });
 
@@ -386,11 +414,13 @@ export class ElysiumService {
       liquidity: {
         poolAddress,
         hypeDeposited: `${hypeLp} HYPE`,
+        devBuyHype: devBuyTxHash ? `${devBuyHype} HYPE` : (devBuyWei > 0n ? `${devBuyHype} HYPE (Attempted)` : '0 HYPE'),
         tokensDeposited: `${ethers.formatUnits(tokenLp, 18)} ${symbol}`,
         initialPriceHype,
         addLiquidityTxHash,
         setPairTxHash,
-        enableTradingTxHash
+        enableTradingTxHash,
+        devBuyTxHash
       },
       urls: {
         tokenExplorer: `${this.explorerUrl}/address/${tokenAddress}`,
@@ -403,3 +433,4 @@ export class ElysiumService {
 }
 
 export const elysiumService = new ElysiumService();
+

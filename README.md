@@ -119,6 +119,8 @@ Kirim perintah berikut ke bot Telegram Anda:
 | `/deploy <Nama> <Ticker> [URL_Gambar]` | Mendeploy token kustom secara manual (akan membuat versi reguler dan versi "BASE"). |
 | `/elysium` (atau `/elys`) | Membuka Dashboard & Launchpad Elysium Mainnet (Chain 99901, gas HYPE, saldo wallet, gas tracker). |
 | `/deployelysium <Nama> <Ticker> [HypeLP] [Fee%]` | Mendeploy token ERC-20 langsung ke Elysium Mainnet + Uniswap V2 Pool + 100% verifikasi otomatis di Elyscan. |
+| `/elysiumlp [0.0001-0.0002]` | Mengatur nominal likuiditas pool HYPE awal di Elysium (rentang 0.0001 s/d 0.0002 HYPE). |
+| `/devbuyelys [0.0001|off]` | Mengatur nominal Dev Buy otomatis sesaat setelah trading dibuka di Elysium (default: 0.0001 HYPE). |
 | `/status` | Mengecek saldo ETH deployer, status RPC Base, dan jumlah token yang telah diluncurkan. |
 | `/history` | Menampilkan daftar token yang sudah dideploy beserta tautan langsung ke BaseScan, DexScreener, dan Clanker. |
 | `/settings` | Melihat parameter default (Dev Buy, Fee, Sniper Tax, Creator Vault, Suffix). |

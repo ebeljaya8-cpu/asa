@@ -96,6 +96,8 @@ export class TelegramBotApp {
 • <code>/fee [3|5|10]</code> - Atur fee buy & sell token (3%, 5%, 10% Max)
 • <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
 • <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [HypeLP] [Fee%]</code> - Deploy token langsung ke Elysium Mainnet (+ Pool Uniswap V2 & Verified)
+• <code>/elysiumlp [0.0001-0.0002]</code> - Atur likuiditas pool awal HYPE (0.0001 s/d 0.0002 HYPE)
+• <code>/devbuyelys [0.0001|off]</code> - Atur dev buy otomatis sesaat setelah trading dibuka (0.0001 HYPE)
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -417,7 +419,7 @@ export class TelegramBotApp {
 
       const name = parts[0];
       const symbol = parts[1].toUpperCase();
-      const hypeLp = parts[2] ? parts[2] : '0.01';
+      const hypeLp = parts[2] ? parts[2] : String(storage.getElysiumLpHype());
       const fee = parts[3] ? Number(parts[3]) : 5;
 
       await this.executeDeployElysium(ctx, {
@@ -427,6 +429,48 @@ export class TelegramBotApp {
         buyFee: fee,
         sellFee: fee
       });
+    });
+
+    // /elysiumlp command (set LP HYPE between 0.0001 and 0.0002)
+    bot.command(['elysiumlp', 'setlphype'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendElysiumLpMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0.0001 || val > 0.0002) {
+        return ctx.replyWithHTML(
+          '⚠️ <b>Nilai LP HYPE harus berada di antara 0.0001 dan 0.0002 HYPE!</b>\n\n' +
+          '<i>Contoh:</i> <code>/elysiumlp 0.0001</code> atau <code>/elysiumlp 0.00015</code>'
+        );
+      }
+      storage.setElysiumLpHype(val);
+      await ctx.replyWithHTML(
+        `✅ <b>Likuiditas Pool (LP) Elysium berhasil diatur ke: ${val} HYPE!</b>\n\n` +
+        `Setiap deployment token di Elysium akan menyetor likuiditas awal sebesar <b>${val} HYPE</b> ke Uniswap V2.`
+      );
+    });
+
+    // /devbuyelys command (set Dev Buy HYPE)
+    bot.command(['devbuyelys', 'elysiumdevbuy'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendElysiumLpMenu(ctx);
+      }
+      const raw = parts[0].toLowerCase();
+      if (raw === 'off' || raw === '0') {
+        storage.setElysiumDevBuyHype(0);
+        return ctx.replyWithHTML('🔴 <b>Dev Buy Otomatis di Elysium dinonaktifkan (0 HYPE)!</b>');
+      }
+      const val = parseFloat(raw);
+      if (isNaN(val) || val <= 0) {
+        return ctx.replyWithHTML('⚠️ Masukkan nominal Dev Buy HYPE yang valid (misal: <code>/devbuyelys 0.0001</code>).');
+      }
+      storage.setElysiumDevBuyHype(val);
+      await ctx.replyWithHTML(
+        `✅ <b>Dev Buy Otomatis di Elysium berhasil diatur ke: ${val} HYPE!</b>\n\n` +
+        `Deployer akan otomatis membeli token sebesar <b>${val} HYPE</b> via Uniswap V2 sesaat setelah trading dibuka.`
+      );
     });
 
     // Action Handlers
@@ -732,12 +776,33 @@ export class TelegramBotApp {
       await this.sendElysiumHistory(ctx);
     });
 
+    bot.action('cmd_elysium_lp_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendElysiumLpMenu(ctx);
+    });
+
+    bot.action(/^set_elys_lp_([0-9\.]+)$/, async (ctx) => {
+      const val = parseFloat(ctx.match[1]);
+      storage.setElysiumLpHype(val);
+      await ctx.answerCbQuery(`LP HYPE diatur ke ${val} HYPE!`).catch(() => {});
+      await this.sendElysiumLpMenu(ctx, true);
+    });
+
+    bot.action(/^set_elys_devbuy_([0-9\.]+|off)$/, async (ctx) => {
+      const raw = ctx.match[1];
+      const val = raw === 'off' ? 0 : parseFloat(raw);
+      storage.setElysiumDevBuyHype(val);
+      await ctx.answerCbQuery(val > 0 ? `Dev Buy diatur ke ${val} HYPE!` : 'Dev Buy dinonaktifkan!').catch(() => {});
+      await this.sendElysiumLpMenu(ctx, true);
+    });
+
     bot.action('cmd_elysium_deploy_welysium', async (ctx) => {
       await ctx.answerCbQuery('Memulai deployment Wrapped Elysium...').catch(() => {});
+      const curLp = storage.getElysiumLpHype();
       await this.executeDeployElysium(ctx, {
         name: 'Wrapped Elysium',
         symbol: 'WELYSIUM',
-        hypeLiquidity: '0.01',
+        hypeLiquidity: String(curLp),
         isWelysium: true,
         buyFee: 5,
         sellFee: 5,
@@ -751,10 +816,11 @@ export class TelegramBotApp {
     bot.action('cmd_elysium_quick_demo', async (ctx) => {
       await ctx.answerCbQuery('Memulai Quick Deploy Token Demo...').catch(() => {});
       const randomTag = Math.floor(100 + Math.random() * 900);
+      const curLp = storage.getElysiumLpHype();
       await this.executeDeployElysium(ctx, {
         name: `Elysium Gem ${randomTag}`,
         symbol: `GEM${randomTag}`,
-        hypeLiquidity: '0.004',
+        hypeLiquidity: String(curLp),
         buyFee: 5,
         sellFee: 5,
         sniperBuyFee: 80,
@@ -772,10 +838,11 @@ export class TelegramBotApp {
         return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending elysium lagi.');
       }
 
+      const curLp = storage.getElysiumLpHype();
       await this.executeDeployElysium(ctx, {
         name: targetToken.name,
         symbol: targetToken.symbol,
-        hypeLiquidity: '0.005',
+        hypeLiquidity: String(curLp),
         buyFee: 5,
         sellFee: 5,
         sniperBuyFee: 80,
@@ -2079,6 +2146,9 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
     const info = await elysiumService.getDeployerInfo();
     const deployedTokens = storage.getElysiumDeployedTokens();
     const totalCount = deployedTokens.length;
+    const curLp = storage.getElysiumLpHype();
+    const curDevBuy = storage.getElysiumDevBuyHype();
+    const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} HYPE</b>` : '🔴 <i>Nonaktif (0 HYPE)</i>';
 
     const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
     const balanceDisplay = info.balanceHype !== 'Error RPC' ? `<b>${parseFloat(info.balanceHype).toFixed(6)} HYPE</b>` : '⚠️ Gagal cek saldo';
@@ -2095,11 +2165,13 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 • Estimasi Gas: ${gasDisplay}
 • Router Uniswap V2: <code>${info.routerAddress}</code>
 
-📊 <b>STATISTIK DEPLOYMENT:</b>
-• Total Token Dideploy: <b>${totalCount} token</b>
+⚙️ <b>SETTING DEFAULT DEPLOYMENT:</b>
+• Likuiditas Pool (LP): <b>${curLp} HYPE</b> (Pilihan: 0.0001 - 0.0002 HYPE)
+• Dev Buy Otomatis: ${devBuyText}
 • Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
 • Fee Default: <b>5% Buy / 5% Sell</b> ke Deployer Wallet
 • Verifikasi Explorer: <b>100% Otomatis di Elyscan (Standard-JSON)</b>
+• Total Token Dideploy: <b>${totalCount} token</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <i>Pilih aksi di bawah:</i>`;
 
@@ -2109,10 +2181,11 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
         Markup.button.callback('🔥 Trending Elysium DEX', 'cmd_trending_elysium')
       ],
       [
-        Markup.button.callback('📜 Riwayat Deploy Elysium', 'cmd_elysium_history'),
-        Markup.button.callback('🔄 Refresh Status & Gas', 'cmd_elysium_menu')
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu'),
+        Markup.button.callback('📜 Riwayat Deploy Elysium', 'cmd_elysium_history')
       ],
       [
+        Markup.button.callback('🔄 Refresh Status & Gas', 'cmd_elysium_menu'),
         Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
@@ -2120,32 +2193,88 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
     await ctx.replyWithHTML(msg, keyboard);
   }
 
+  async sendElysiumLpMenu(ctx, isEdit = false) {
+    const curLp = storage.getElysiumLpHype();
+    const curDevBuy = storage.getElysiumDevBuyHype();
+    const devBuyLabel = curDevBuy > 0 ? `🟢 ${curDevBuy} HYPE` : '🔴 Nonaktif (0 HYPE)';
+
+    const msg = 
+`⚙️ <b>PENGATURAN LIKUIDITAS (LP) &amp; DEV BUY ELYSIUM</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Atur jumlah native gas <b>HYPE</b> yang disetor ke Pool Uniswap V2 dan nominal Dev Buy otomatis saat peluncuran token di Elysium Mainnet:
+
+💧 <b>Setting LP Saat Ini:</b> <code>${curLp} HYPE</code>
+🛒 <b>Setting Dev Buy Saat Ini:</b> <code>${devBuyLabel}</code>
+💡 <b>Rentang LP yang Diizinkan:</b> <code>0.0001</code> s/d <code>0.0002 HYPE</code>
+
+<i>Pilih nilai cepat di bawah atau gunakan perintah chat:</i>
+• <code>/elysiumlp 0.0001</code> s/d <code>/elysiumlp 0.0002</code>
+• <code>/devbuyelys 0.0001</code> (atau <code>/devbuyelys off</code>)`;
+
+    const checkLp = (val) => Number(curLp) === Number(val) ? '✅ ' : '';
+    const checkDevBuy = (val) => Number(curDevBuy) === Number(val) ? '✅ ' : '';
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${checkLp(0.0001)}0.0001 HYPE (Min)`, 'set_elys_lp_0.0001'),
+        Markup.button.callback(`${checkLp(0.00012)}0.00012 HYPE`, 'set_elys_lp_0.00012')
+      ],
+      [
+        Markup.button.callback(`${checkLp(0.00015)}0.00015 HYPE`, 'set_elys_lp_0.00015'),
+        Markup.button.callback(`${checkLp(0.00018)}0.00018 HYPE`, 'set_elys_lp_0.00018')
+      ],
+      [
+        Markup.button.callback(`${checkLp(0.0002)}0.0002 HYPE (Max)`, 'set_elys_lp_0.0002')
+      ],
+      [
+        Markup.button.callback(`${checkDevBuy(0.0001)}🛒 Dev Buy: 0.0001 HYPE`, 'set_elys_devbuy_0.0001'),
+        Markup.button.callback(`${curDevBuy === 0 ? '✅ ' : ''}❌ Dev Buy: OFF`, 'set_elys_devbuy_off')
+      ],
+      [
+        Markup.button.callback('🪐 Kembali ke Menu Elysium', 'cmd_elysium_menu'),
+        Markup.button.callback('⬅️ Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
   async sendElysiumDeployMenu(ctx) {
     const info = await elysiumService.getDeployerInfo();
     const balNum = parseFloat(info.balanceHype) || 0;
-    const safeLp = balNum >= 0.02 ? '0.01' : (balNum >= 0.008 ? '0.004' : '0.001');
+    const curLp = storage.getElysiumLpHype();
+    const curDevBuy = storage.getElysiumDevBuyHype();
 
     const msg = 
 `🚀 <b>PANEL DEPLOY TOKEN KE ELYSIUM MAINNET</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Saldo Deployer Saat Ini: <b>${balNum.toFixed(6)} HYPE</b>
-• Rekomendasi LP HYPE: <b>${safeLp} HYPE</b>
+• Setting Likuiditas (LP): <b>${curLp} HYPE</b>
+• Setting Dev Buy: <b>${curDevBuy > 0 ? `${curDevBuy} HYPE` : 'Nonaktif'}</b>
 
 💡 <b>Cara Deploy:</b>
 1️⃣ <b>Gunakan Perintah Cepat di Chat:</b>
 <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [HypeLP] [Fee%]</code>
 <i>Contoh:</i>
-• <code>/deployelysium PepeElysium PEPE ${safeLp} 5</code>
-• <code>/deployelysium CyberDog CDOG ${safeLp} 5</code>
+• <code>/deployelysium PepeElysium PEPE ${curLp} 5</code>
+• <code>/deployelysium CyberDog CDOG ${curLp} 5</code>
 
 2️⃣ <b>Atau Pilih Preset di Bawah:</b>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('💎 Deploy Wrapped Elysium (WELYSIUM)', 'cmd_elysium_deploy_welysium')
+        Markup.button.callback(`💎 Deploy WELYSIUM (LP ${curLp} HYPE)`, 'cmd_elysium_deploy_welysium')
       ],
       [
-        Markup.button.callback(`⚡ Quick Deploy Token Demo (${safeLp} HYPE LP)`, 'cmd_elysium_quick_demo')
+        Markup.button.callback(`⚡ Quick Deploy Token Demo (${curLp} HYPE)`, 'cmd_elysium_quick_demo')
+      ],
+      [
+        Markup.button.callback('⚙️ Ubah Setting LP & Dev Buy', 'cmd_elysium_lp_menu')
       ],
       [
         Markup.button.callback('🪐 Radar Trending Elysium (+ 1-Click Deploy)', 'cmd_trending_elysium')
@@ -2191,15 +2320,19 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
   }
 
   async executeDeployElysium(ctx, options = {}) {
+    const hypeLp = String(options.hypeLiquidity || storage.getElysiumLpHype() || '0.0001');
+    const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0.0001'));
+
     const initialMsg = await ctx.replyWithHTML(
       `🪐 <b>MEMULAI DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
-      `• Likuiditas Pool: <b>${options.hypeLiquidity || '0.01'} HYPE</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
+      `• Likuiditas Pool: <b>${hypeLp} HYPE</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
+      `• Dev Buy Otomatis: <b>${Number(devBuyHype) > 0 ? `${devBuyHype} HYPE` : 'Nonaktif'}</b>\n` +
       `• Fee: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>\n` +
       `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n` +
       `• Router: <code>0x3320b5685c1c4a0d2a5b0ca30dcee095142bf076</code>\n\n` +
-      `⏳ <i>Langkah 1/7: Memeriksa saldo HYPE &amp; parameter on-chain...</i>`
+      `⏳ <i>Langkah 1/8: Memeriksa saldo HYPE &amp; parameter on-chain...</i>`
     );
 
     const progressUpdates = async (step, msg) => {
@@ -2211,7 +2344,7 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
           `🪐 <b>DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
           `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
-          `• Status: <b>Langkah ${step}/7</b>\n\n` +
+          `• Status: <b>Langkah ${step}/8</b>\n\n` +
           `⏳ <i>${escapeHtml(msg)}</i>`,
           { parse_mode: 'HTML' }
         );
@@ -2219,7 +2352,12 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
     };
 
     try {
-      const result = await elysiumService.deployToken(options, progressUpdates);
+      const deployOptions = {
+        ...options,
+        hypeLiquidity: hypeLp,
+        devBuyHype
+      };
+      const result = await elysiumService.deployToken(deployOptions, progressUpdates);
 
       const summaryMsg = 
 `🎉 <b>TOKEN BERHASIL DIDEPLOY &amp; LIVE DI ELYSIUM MAINNET!</b>
@@ -2234,6 +2372,7 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 💧 <b>Uniswap V2 Pool &amp; Likuiditas:</b>
 • Alamat Pool (Pair): <code>${result.liquidity.poolAddress}</code>
 • Likuiditas Awal: <b>${result.liquidity.hypeDeposited}</b> + <b>${result.liquidity.tokensDeposited}</b>
+• Dev Buy Otomatis: <b>${result.liquidity.devBuyHype}</b>
 • Harga Awal: <code>${result.liquidity.initialPriceHype} HYPE</code>
 • Trading: <b>🟢 AKTIF (Bisa dibeli &amp; dijual langsung!)</b>
 
@@ -2245,7 +2384,7 @@ ${result.lock.address ? `• Timelock: <code>${result.lock.address}</code> (${re
 • Deploy Token: <a href="${result.urls.tokenExplorer}">${result.token.deployTxHash.slice(0, 14)}...</a>
 • Add Liquidity: <code>${result.liquidity.addLiquidityTxHash.slice(0, 14)}...</code>
 • Enable Trading: <code>${result.liquidity.enableTradingTxHash.slice(0, 14)}...</code>
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devBuyTxHash.slice(0, 14)}...</code>\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <i>Klik tautan di bawah untuk melihat di Explorer &amp; Dex:</i>`;
 
       const buttons = [

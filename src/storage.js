@@ -154,7 +154,8 @@ export class Storage {
       feeWallet: record.feeWallet || record.deployerAddress,
       buyFee: record.buyFee || 5,
       sellFee: record.sellFee || 5,
-      hypeDeposited: record.hypeDeposited || '0.01',
+      hypeDeposited: record.hypeDeposited || '0.0001',
+      devBuyHype: record.devBuyHype || '0.0001',
       tokenDeposited: record.tokenDeposited || '20000000000',
       initialPriceHype: record.initialPriceHype || 0,
       deployTx: record.deployTx || '',
@@ -162,6 +163,7 @@ export class Storage {
       addLiquidityTx: record.addLiquidityTx || '',
       setPairTx: record.setPairTx || '',
       enableTradingTx: record.enableTradingTx || '',
+      devBuyTx: record.devBuyTx || '',
       isVerified: Boolean(record.isVerified),
       deployedAt: new Date().toISOString(),
       network: 'Elysium Mainnet',
@@ -382,6 +384,34 @@ export class Storage {
         }
       }
     }
+    this.saveState(state);
+    return target;
+  }
+
+  getElysiumLpHype() {
+    const state = this.getState();
+    return state.elysiumLpHype !== undefined ? state.elysiumLpHype : (config.elysiumDefaultLpHype || 0.0001);
+  }
+
+  setElysiumLpHype(amount) {
+    const num = parseFloat(amount);
+    const target = !isNaN(num) && num >= 0.0001 && num <= 0.0002 ? num : 0.0001;
+    const state = this.getState();
+    state.elysiumLpHype = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getElysiumDevBuyHype() {
+    const state = this.getState();
+    return state.elysiumDevBuyHype !== undefined ? state.elysiumDevBuyHype : (config.elysiumDevBuyHype || 0.0001);
+  }
+
+  setElysiumDevBuyHype(amount) {
+    const num = parseFloat(amount);
+    const target = isNaN(num) || num < 0 ? 0 : num;
+    const state = this.getState();
+    state.elysiumDevBuyHype = target;
     this.saveState(state);
     return target;
   }
