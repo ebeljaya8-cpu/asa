@@ -85,7 +85,7 @@ export const config = {
   // Base Direct Deploy (Tanpa Clanker) Settings
   baseDirectDefaultDex: process.env.BASE_DIRECT_DEFAULT_DEX || 'v4',
   baseDirectDefaultPair: process.env.BASE_DIRECT_DEFAULT_PAIR || 'ETH',
-  baseDirectDefaultLpEth: parseFloat(process.env.BASE_DIRECT_DEFAULT_LP_ETH || '0.0001'),
+  baseDirectDefaultLpEth: parseFloat(process.env.BASE_DIRECT_DEFAULT_LP_ETH || '0.00001'),
   baseDirectDevBuyEth: parseFloat(process.env.BASE_DIRECT_DEV_BUY_ETH || '0.0001'),
   baseDirectDefaultTotalSupply: process.env.BASE_DIRECT_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
   baseV4PoolManager: process.env.BASE_V4_POOL_MANAGER || '0x498581fF718922c3f8e6A244956aF099B2652b2b',

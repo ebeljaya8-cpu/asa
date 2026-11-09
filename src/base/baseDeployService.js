@@ -348,7 +348,7 @@ export class BaseDeployService {
     const pairChoice = (options.pair || storage.getBaseDirectPairToken() || 'ETH').toUpperCase().trim();
     const feeTier = Number(options.feeTier || storage.getBaseDirectV3FeeTier() || 10000);
 
-    const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || config.baseDirectDefaultLpEth || '0.0001');
+    const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || config.baseDirectDefaultLpEth || '0.00001');
     const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.0001'));
     const ethLpWei = ethers.parseEther(ethLp);
     const devBuyWei = ethers.parseEther(devBuyEth);
@@ -934,3 +934,4 @@ export class BaseDeployService {
 }
 
 export const baseDeployService = new BaseDeployService();
+

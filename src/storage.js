@@ -532,12 +532,12 @@ export class Storage {
 
   getBaseDirectLpEth() {
     const state = this.getState();
-    return state.baseDirectLpEth !== undefined ? state.baseDirectLpEth : (config.baseDirectDefaultLpEth || 0.0001);
+    return state.baseDirectLpEth !== undefined ? state.baseDirectLpEth : (config.baseDirectDefaultLpEth || 0.00001);
   }
 
   setBaseDirectLpEth(amount) {
     const num = parseFloat(amount);
-    const target = !isNaN(num) && num >= 0.0001 && num <= 0.002 ? num : 0.0001;
+    const target = !isNaN(num) && num >= 0.00001 && num <= 0.002 ? num : 0.00001;
     const state = this.getState();
     state.baseDirectLpEth = target;
     this.saveState(state);

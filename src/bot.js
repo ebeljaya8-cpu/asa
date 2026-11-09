@@ -108,7 +108,7 @@ export class TelegramBotApp {
 • <code>/basedeploy &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpEth] [Fee%] [ImageUrl]</code> - Deploy mandiri ke Base (+ Uniswap V4 Pool, Pinata IPFS Logo &amp; Anti-Sniper)
 • <code>/basepair [eth|usdc|weth]</code> - Atur trading pair Base (ETH, USDC, WETH)
 • <code>/basedex [v4|v3|v2]</code> - Atur DEX Engine Base (Uniswap V4 Standar / V3 / V2)
-• <code>/baselp [0.0001-0.002]</code> - Atur likuiditas pool awal ETH di Base
+• <code>/baselp [0.00001-0.002]</code> - Atur likuiditas pool awal ETH di Base (default: 0.00001 ETH)
 • <code>/basedevbuy [0.0001|off]</code> - Atur dev buy otomatis di Base (0.0001 ETH)
 • <code>/basehistory</code> - Riwayat token deploy mandiri di Base
 • <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
@@ -574,8 +574,8 @@ export class TelegramBotApp {
           'Gunakan: <code>/basedeploy &lt;NamaToken&gt; &lt;Ticker&gt; [Pair] [LP] [Fee%] [ImageUrl]</code>\n' +
           '<i>Contoh:</i>\n' +
           '• <code>/basedeploy BasePepe PEPE</code> (Gunakan default LP & Pair)\n' +
-          '• <code>/basedeploy CyberCat CCAT USDC 0.0001 5 https://assets.coingecko.com/coins/images/placeholder.png</code>\n' +
-          '• <code>/basedeploy SuperAI SUPER ETH 0.0001 5</code>\n\n' +
+          '• <code>/basedeploy CyberCat CCAT USDC 0.00001 5 https://assets.coingecko.com/coins/images/placeholder.png</code>\n' +
+          '• <code>/basedeploy SuperAI SUPER ETH 0.00001 5</code>\n\n' +
           '<i>Logo akan otomatis diunggah ke IPFS via Pinata!</i>\n\n' +
           'Atau ketik <code>/basedeploy</code> saja untuk membuka panduan & menu preset interaktif.'
         );
@@ -597,7 +597,7 @@ export class TelegramBotApp {
           imageUrl = item;
         } else if (validPairs.includes(item.toUpperCase())) {
           pairChoice = item.toUpperCase();
-        } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0.0001 && parseFloat(item) <= 0.002) {
+        } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0.00001 && parseFloat(item) <= 0.002) {
           ethLp = item;
         } else if (!isNaN(parseFloat(item)) && parseFloat(item) > 0 && parseFloat(item) <= 20) {
           fee = Number(item);
@@ -661,10 +661,10 @@ export class TelegramBotApp {
         return this.sendBaseDirectLpMenu(ctx);
       }
       const val = parseFloat(parts[0]);
-      if (isNaN(val) || val < 0.0001 || val > 0.002) {
+      if (isNaN(val) || val < 0.00001 || val > 0.002) {
         return ctx.replyWithHTML(
-          '⚠️ <b>Nilai LP ETH harus berada di antara 0.0001 dan 0.002 ETH!</b>\n\n' +
-          '<i>Contoh:</i> <code>/baselp 0.0001</code> atau <code>/baselp 0.0002</code>'
+          '⚠️ <b>Nilai LP ETH harus berada di antara 0.00001 dan 0.002 ETH!</b>\n\n' +
+          '<i>Contoh:</i> <code>/baselp 0.00001</code> atau <code>/baselp 0.0001</code>'
         );
       }
       storage.setBaseDirectLpEth(val);
@@ -3099,10 +3099,10 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
 
 💧 <b>Setting LP Saat Ini:</b> <code>${curLp} ETH / Quote</code>
 🛒 <b>Setting Dev Buy Saat Ini:</b> <code>${devBuyLabel}</code>
-💡 <b>Rentang LP yang Diizinkan:</b> <code>0.0001</code> s/d <code>0.002 ETH</code>
+💡 <b>Rentang LP yang Diizinkan:</b> <code>0.00001</code> s/d <code>0.002 ETH</code>
 
 <i>Pilih nilai cepat di bawah atau gunakan perintah chat:</i>
-• <code>/baselp 0.0001</code> s/d <code>/baselp 0.002</code>
+• <code>/baselp 0.00001</code> s/d <code>/baselp 0.002</code>
 • <code>/basedevbuy 0.0001</code> (atau <code>/basedevbuy off</code>)`;
 
     const checkLp = (val) => Number(curLp) === Number(val) ? '✅ ' : '';
@@ -3110,14 +3110,15 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback(`${checkLp(0.0001)}0.0001 ETH (Min)`, 'set_base_lp_0.0001'),
-        Markup.button.callback(`${checkLp(0.00015)}0.00015 ETH`, 'set_base_lp_0.00015')
+        Markup.button.callback(`${checkLp(0.00001)}0.00001 ETH (Min & Default)`, 'set_base_lp_0.00001'),
+        Markup.button.callback(`${checkLp(0.00005)}0.00005 ETH`, 'set_base_lp_0.00005')
       ],
       [
-        Markup.button.callback(`${checkLp(0.0002)}0.0002 ETH`, 'set_base_lp_0.0002'),
-        Markup.button.callback(`${checkLp(0.0005)}0.0005 ETH`, 'set_base_lp_0.0005')
+        Markup.button.callback(`${checkLp(0.0001)}0.0001 ETH`, 'set_base_lp_0.0001'),
+        Markup.button.callback(`${checkLp(0.0002)}0.0002 ETH`, 'set_base_lp_0.0002')
       ],
       [
+        Markup.button.callback(`${checkLp(0.0005)}0.0005 ETH`, 'set_base_lp_0.0005'),
         Markup.button.callback(`${checkLp(0.001)}0.001 ETH`, 'set_base_lp_0.001')
       ],
       [
@@ -3220,7 +3221,7 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
   }
 
   async executeDeployBaseDirect(ctx, options = {}) {
-    const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || '0.0001');
+    const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || '0.00001');
     const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.0001'));
     const pairChoice = options.pair || storage.getBaseDirectPairToken() || 'ETH';
     const dexVersion = options.dexVersion || storage.getBaseDirectDexVersion() || 'v4';
