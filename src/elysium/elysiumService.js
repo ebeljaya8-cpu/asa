@@ -251,6 +251,8 @@ export class ElysiumService {
     const dexVersion = storage.getElysiumDexVersion();
     const pairToken = storage.getElysiumPairToken();
     const v3FeeTier = storage.getElysiumV3FeeTier();
+    const buyFee = storage.getElysiumBuyFee();
+    const sellFee = storage.getElysiumSellFee();
 
     if (!wallet) {
       return {
@@ -267,6 +269,8 @@ export class ElysiumService {
         dexVersion,
         pairToken,
         v3FeeTier,
+        buyFee,
+        sellFee,
         v4PoolManager: this.v4PoolManager,
         v4PositionManager: this.v4PositionManager,
         universalRouter: this.universalRouter,
@@ -305,6 +309,8 @@ export class ElysiumService {
         dexVersion,
         pairToken,
         v3FeeTier,
+        buyFee,
+        sellFee,
         v4PoolManager: this.v4PoolManager,
         v4PositionManager: this.v4PositionManager,
         universalRouter: this.universalRouter,
@@ -329,6 +335,8 @@ export class ElysiumService {
         dexVersion,
         pairToken,
         v3FeeTier,
+        buyFee,
+        sellFee,
         v4PoolManager: this.v4PoolManager,
         v4PositionManager: this.v4PositionManager,
         universalRouter: this.universalRouter,
@@ -454,8 +462,8 @@ export class ElysiumService {
     const symbol = (options.symbol || 'ELYS').trim().toUpperCase();
     const totalSupply = options.totalSupply ? BigInt(options.totalSupply) : ethers.parseEther('100000000000'); // 100B default
     const feeWallet = options.feeWallet && ethers.isAddress(options.feeWallet) ? options.feeWallet : wallet.address;
-    const buyFee = Number(options.buyFee ?? 5);
-    const sellFee = Number(options.sellFee ?? 5);
+    const buyFee = Number(options.buyFee !== undefined ? options.buyFee : storage.getElysiumBuyFee());
+    const sellFee = Number(options.sellFee !== undefined ? options.sellFee : storage.getElysiumSellFee());
     const sniperBuyFee = Number(options.sniperBuyFee ?? 80);
     const sniperWindowMinutes = Number(options.sniperWindowMinutes ?? 30);
     const tokenLp = options.tokenLiquidity ? BigInt(options.tokenLiquidity) : ethers.parseEther('20000000000'); // 20B LP default

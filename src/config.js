@@ -122,6 +122,8 @@ export const config = {
   elysiumExplorer: process.env.ELYSIUM_EXPLORER || 'https://elyscan.live',
   elysiumPrivateKey: process.env.ELYSIUM_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.PRIVATE_KEY_1 || process.env.PRIVATE_KEY || '',
   elysiumFeeWallet: process.env.ELYSIUM_FEE_WALLET || '',
+  elysiumDefaultBuyFee: parseFloat(process.env.ELYSIUM_DEFAULT_BUY_FEE || '5'),
+  elysiumDefaultSellFee: parseFloat(process.env.ELYSIUM_DEFAULT_SELL_FEE || '5'),
   elysiumDefaultLpHype: parseFloat(process.env.ELYSIUM_DEFAULT_LP_HYPE || '0.0001'),
   elysiumDevBuyHype: parseFloat(process.env.ELYSIUM_DEV_BUY_HYPE || '0.0001'),
   elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000' // 100B

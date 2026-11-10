@@ -112,6 +112,9 @@ export class TelegramBotApp {
 • <code>/basedevbuy [0.000001|off]</code> - Atur dev buy otomatis di Base (default: 0.000001 ETH)
 • <code>/basehistory</code> - Riwayat token deploy mandiri di Base
 • <code>/elysium</code> - Dashboard & Launchpad Elysium Mainnet (Chain 99901)
+• <code>/elysfee [buy%] [sell%]</code> - Atur fee beli & jual di Elysium (% dari total transaksi USD)
+• <code>/elysbuyfee [0-25]</code> - Atur fee beli (buy fee) di Elysium
+• <code>/elyssellfee [0-25]</code> - Atur fee jual (sell fee) di Elysium
 • <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpHype] [Fee%] [ImageUrl]</code> - Deploy token ke Elysium (+ Uniswap V4 Pool, Pinata IPFS Logo &amp; Verified)
 • <code>/elysiumpair [hype|eth|usdc|weth]</code> - Atur trading pair (HYPE, ETH, USDC, WETH)
 • <code>/elysiumdex [v4|v3|v2]</code> - Atur DEX Engine (Uniswap V4 Standar / V3 / V2)
@@ -445,7 +448,9 @@ export class TelegramBotApp {
 
       let hypeLp = String(storage.getElysiumLpHype());
       let pairChoice = storage.getElysiumPairToken();
-      let fee = 5;
+      let buyFee = storage.getElysiumBuyFee();
+      let sellFee = storage.getElysiumSellFee();
+      let feeCount = 0;
       let imageUrl = '';
 
       const validPairs = ['HYPE', 'ETH', 'USDC', 'WETH'];
@@ -458,8 +463,15 @@ export class TelegramBotApp {
           pairChoice = item.toUpperCase();
         } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0.0001 && parseFloat(item) <= 0.0002) {
           hypeLp = item;
-        } else if (!isNaN(parseFloat(item)) && parseFloat(item) > 0 && parseFloat(item) <= 20) {
-          fee = Number(item);
+        } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0 && parseFloat(item) <= 25) {
+          if (feeCount === 0) {
+            buyFee = Number(item);
+            sellFee = Number(item);
+            feeCount++;
+          } else if (feeCount === 1) {
+            sellFee = Number(item);
+            feeCount++;
+          }
         }
       }
 
@@ -469,8 +481,8 @@ export class TelegramBotApp {
         imageUrl,
         pair: pairChoice,
         hypeLiquidity: hypeLp,
-        buyFee: fee,
-        sellFee: fee
+        buyFee,
+        sellFee
       });
     });
 
@@ -553,6 +565,82 @@ export class TelegramBotApp {
       await ctx.replyWithHTML(
         `✅ <b>Dev Buy Otomatis di Elysium berhasil diatur ke: ${val} HYPE!</b>\n\n` +
         `Deployer akan otomatis membeli token sebesar <b>${val} HYPE</b> via Uniswap V3 sesaat setelah trading dibuka.`
+      );
+    });
+
+    // /elysfee, /elysiumfee command (set Buy Fee & Sell Fee on Elysium)
+    bot.command(['elysfee', 'elysiumfee', 'setelysfee'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendElysiumFeeMenu(ctx);
+      }
+
+      if (parts.length === 1) {
+        const val = parseFloat(parts[0]);
+        if (isNaN(val) || val < 0 || val > 25) {
+          return ctx.replyWithHTML('⚠️ Masukkan persentase fee yang valid antara 0% dan 25% (misal: <code>/elysfee 5</code>).');
+        }
+        storage.setElysiumFees(val, val);
+        return ctx.replyWithHTML(
+          `✅ <b>Fee Elysium berhasil diatur!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• 🟢 <b>Fee Beli (Buy Fee):</b> <b>${val}%</b> dari total nilai transaksi USD\n` +
+          `• 🔴 <b>Fee Jual (Sell Fee):</b> <b>${val}%</b> dari total nilai transaksi USD\n\n` +
+          `💡 Setiap ada user yang buy atau sell token di DEX (Uniswap), kontrak on-chain otomatis memotong ${val}% dari total nilai transaksi dalam USD dan mengirimkannya langsung ke Fee Wallet deployer Anda.`
+        );
+      }
+
+      const buyVal = parseFloat(parts[0]);
+      const sellVal = parseFloat(parts[1]);
+      if (isNaN(buyVal) || buyVal < 0 || buyVal > 25 || isNaN(sellVal) || sellVal < 0 || sellVal > 25) {
+        return ctx.replyWithHTML('⚠️ Masukkan persentase buy dan sell fee antara 0% dan 25% (misal: <code>/elysfee 3 5</code>).');
+      }
+
+      storage.setElysiumFees(buyVal, sellVal);
+      await ctx.replyWithHTML(
+        `✅ <b>Fee Elysium berhasil diperbarui!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• 🟢 <b>Fee Beli (Buy Fee):</b> <b>${buyVal}%</b> dari total nilai transaksi USD\n` +
+        `• 🔴 <b>Fee Jual (Sell Fee):</b> <b>${sellVal}%</b> dari total nilai transaksi USD\n\n` +
+        `💡 Setiap order buy dikenakan potongan ${buyVal}% USD, dan order sell dikenakan potongan ${sellVal}% USD langsung ke Fee Wallet deployer.`
+      );
+    });
+
+    // /elysbuyfee command (set Buy Fee only on Elysium)
+    bot.command(['elysbuyfee', 'elysiumbuyfee'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendElysiumFeeMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0 || val > 25) {
+        return ctx.replyWithHTML('⚠️ Masukkan persentase fee beli antara 0% dan 25% (misal: <code>/elysbuyfee 3</code>).');
+      }
+      storage.setElysiumBuyFee(val);
+      const curSell = storage.getElysiumSellFee();
+      await ctx.replyWithHTML(
+        `✅ <b>Fee Beli (Buy Fee) Elysium diatur ke: ${val}%!</b>\n\n` +
+        `• 🟢 Fee Beli: <b>${val}%</b> dari total transaksi USD\n` +
+        `• 🔴 Fee Jual: <b>${curSell}%</b> dari total transaksi USD\n\n` +
+        `<i>Fee dipotong otomatis saat pembeli menukar HYPE/Quote ke token di DEX.</i>`
+      );
+    });
+
+    // /elyssellfee command (set Sell Fee only on Elysium)
+    bot.command(['elyssellfee', 'elysiumsellfee'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendElysiumFeeMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0 || val > 25) {
+        return ctx.replyWithHTML('⚠️ Masukkan persentase fee jual antara 0% dan 25% (misal: <code>/elyssellfee 5</code>).');
+      }
+      storage.setElysiumSellFee(val);
+      const curBuy = storage.getElysiumBuyFee();
+      await ctx.replyWithHTML(
+        `✅ <b>Fee Jual (Sell Fee) Elysium diatur ke: ${val}%!</b>\n\n` +
+        `• 🟢 Fee Beli: <b>${curBuy}%</b> dari total transaksi USD\n` +
+        `• 🔴 Fee Jual: <b>${val}%</b> dari total transaksi USD\n\n` +
+        `<i>Fee dipotong otomatis saat penjual menukar token kembali ke HYPE/Quote di DEX.</i>`
       );
     });
 
@@ -1024,6 +1112,37 @@ export class TelegramBotApp {
       await this.sendElysiumLpMenu(ctx, true);
     });
 
+    bot.action('cmd_elysium_fee_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendElysiumFeeMenu(ctx, true);
+    });
+
+    bot.action(/^dummy_/, async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+    });
+
+    bot.action(/^set_elys_fees_([0-9\.]+)_([0-9\.]+)$/, async (ctx) => {
+      const b = parseFloat(ctx.match[1]);
+      const s = parseFloat(ctx.match[2]);
+      storage.setElysiumFees(b, s);
+      await ctx.answerCbQuery(`Fee Elysium diatur: ${b}% Buy / ${s}% Sell!`).catch(() => {});
+      await this.sendElysiumFeeMenu(ctx, true);
+    });
+
+    bot.action(/^set_elys_buyfee_([0-9\.]+)$/, async (ctx) => {
+      const b = parseFloat(ctx.match[1]);
+      storage.setElysiumBuyFee(b);
+      await ctx.answerCbQuery(`Fee Beli Elysium diatur ke ${b}%!`).catch(() => {});
+      await this.sendElysiumFeeMenu(ctx, true);
+    });
+
+    bot.action(/^set_elys_sellfee_([0-9\.]+)$/, async (ctx) => {
+      const s = parseFloat(ctx.match[1]);
+      storage.setElysiumSellFee(s);
+      await ctx.answerCbQuery(`Fee Jual Elysium diatur ke ${s}%!`).catch(() => {});
+      await this.sendElysiumFeeMenu(ctx, true);
+    });
+
     bot.action('cmd_elysium_pair_menu', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendElysiumPairMenu(ctx);
@@ -1057,8 +1176,8 @@ export class TelegramBotApp {
         imageUrl: 'https://raw.githubusercontent.com/ebeljaya8-cpu/asa/main/data/elysium-logo.png',
         hypeLiquidity: String(curLp),
         isWelysium: true,
-        buyFee: 5,
-        sellFee: 5,
+        buyFee: storage.getElysiumBuyFee(),
+        sellFee: storage.getElysiumSellFee(),
         sniperBuyFee: 80,
         sniperWindowMinutes: 30,
         lockAmount: ethers.parseEther('6000000000'),
@@ -1075,8 +1194,8 @@ export class TelegramBotApp {
         symbol: `GEM${randomTag}`,
         imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
         hypeLiquidity: String(curLp),
-        buyFee: 5,
-        sellFee: 5,
+        buyFee: storage.getElysiumBuyFee(),
+        sellFee: storage.getElysiumSellFee(),
         sniperBuyFee: 80,
         sniperWindowMinutes: 30,
         lockAmount: 0n
@@ -1098,8 +1217,8 @@ export class TelegramBotApp {
         symbol: targetToken.symbol,
         imageUrl: targetToken.imageUrl,
         hypeLiquidity: String(curLp),
-        buyFee: 5,
-        sellFee: 5,
+        buyFee: storage.getElysiumBuyFee(),
+        sellFee: storage.getElysiumSellFee(),
         sniperBuyFee: 80,
         sniperWindowMinutes: 30,
         lockAmount: 0n
@@ -2506,6 +2625,8 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
     const curDevBuy = storage.getElysiumDevBuyHype();
     const curPair = storage.getElysiumPairToken();
     const curDex = storage.getElysiumDexVersion().toUpperCase();
+    const curBuyFee = storage.getElysiumBuyFee();
+    const curSellFee = storage.getElysiumSellFee();
     const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} HYPE</b>` : '🔴 <i>Nonaktif (0 HYPE)</i>';
 
     const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
@@ -2535,8 +2656,8 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 • Trading Pair: ${pairBadge}
 • Likuiditas Pool (LP): <b>${curLp} HYPE / Quote</b> (0.0001 - 0.0002)
 • Dev Buy Otomatis: ${devBuyText}
+• Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (% dari total transaksi USD)
 • Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
-• Fee Default: <b>5% Buy / 5% Sell</b> ke Deployer Wallet
 • Verifikasi Explorer: <b>100% Otomatis di Elyscan</b>
 • Total Token Dideploy: <b>${totalCount} token</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2552,11 +2673,14 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
         Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_elysium_dex_menu')
       ],
       [
-        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu'),
-        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_elysium_history')
+        Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_elysium_fee_menu'),
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu')
       ],
       [
-        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_elysium_menu'),
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_elysium_history'),
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_elysium_menu')
+      ],
+      [
         Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
@@ -2715,6 +2839,85 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
     return ctx.replyWithHTML(msg, keyboard);
   }
 
+  async sendElysiumFeeMenu(ctx, isEdit = false) {
+    const curBuyFee = storage.getElysiumBuyFee();
+    const curSellFee = storage.getElysiumSellFee();
+
+    const msg = 
+`🏷️ <b>PENGATURAN FEE JUAL &amp; BELI (ELYSIUM MAINNET)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901).
+
+💰 <b>Mekanisme Perhitungan Fee:</b>
+• Fee dihitung dan dipotong langsung saat swap di DEX Uniswap Elysium.
+• Besaran fee adalah <b>persentase (%) dari total nilai transaksi dalam USD</b> pada setiap order Buy maupun Sell.
+• Hasil fee dipotong otomatis dan langsung masuk ke wallet deployer (fee wallet).
+• <b>Anti-Sniper Protection:</b> Saat 30 menit pertama peluncuran, sniper buy tax 80% aktif untuk menahan bot. Setelah periode sniper usai, otomatis mengikuti <b>Fee Beli (${curBuyFee}%)</b> ini.
+
+📊 <b>Konfigurasi Fee Saat Ini:</b>
+• 🟢 <b>Fee Beli (Buy Fee):</b> <b>${curBuyFee}%</b> dari total nilai USD order beli
+• 🔴 <b>Fee Jual (Sell Fee):</b> <b>${curSellFee}%</b> dari total nilai USD order jual
+
+👇 <i>Pilih preset kombinasi atau klik angka individual di bawah:</i>
+
+💬 <b>Perintah Chat Langsung:</b>
+• <code>/elysfee &lt;buy%&gt; &lt;sell%&gt;</code> (Contoh: <code>/elysfee 3 5</code>)
+• <code>/elysbuyfee &lt;%&gt;</code> (Contoh: <code>/elysbuyfee 3</code>)
+• <code>/elyssellfee &lt;%&gt;</code> (Contoh: <code>/elyssellfee 5</code>)`;
+
+    const isPreset = (b, s) => (Number(curBuyFee) === b && Number(curSellFee) === s) ? '✅ ' : '';
+    const isBuy = (b) => Number(curBuyFee) === b ? '✅ ' : '';
+    const isSell = (s) => Number(curSellFee) === s ? '✅ ' : '';
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${isPreset(0, 0)}0% / 0% (Bebas Fee)`, 'set_elys_fees_0_0'),
+        Markup.button.callback(`${isPreset(1, 1)}1% / 1% (Rendah)`, 'set_elys_fees_1_1')
+      ],
+      [
+        Markup.button.callback(`${isPreset(3, 3)}3% / 3% (Standar)`, 'set_elys_fees_3_3'),
+        Markup.button.callback(`${isPreset(5, 5)}5% / 5% (Default Rekomendasi)`, 'set_elys_fees_5_5')
+      ],
+      [
+        Markup.button.callback(`${isPreset(3, 5)}3% Buy / 5% Sell`, 'set_elys_fees_3_5'),
+        Markup.button.callback(`${isPreset(5, 10)}5% Buy / 10% Sell`, 'set_elys_fees_5_10')
+      ],
+      [
+        Markup.button.callback('── 🟢 Atur Fee Beli (Buy Fee) ──', 'dummy_buy_label')
+      ],
+      [
+        Markup.button.callback(`${isBuy(0)}0%`, 'set_elys_buyfee_0'),
+        Markup.button.callback(`${isBuy(1)}1%`, 'set_elys_buyfee_1'),
+        Markup.button.callback(`${isBuy(2)}2%`, 'set_elys_buyfee_2'),
+        Markup.button.callback(`${isBuy(3)}3%`, 'set_elys_buyfee_3'),
+        Markup.button.callback(`${isBuy(5)}5%`, 'set_elys_buyfee_5'),
+        Markup.button.callback(`${isBuy(10)}10%`, 'set_elys_buyfee_10')
+      ],
+      [
+        Markup.button.callback('── 🔴 Atur Fee Jual (Sell Fee) ──', 'dummy_sell_label')
+      ],
+      [
+        Markup.button.callback(`${isSell(0)}0%`, 'set_elys_sellfee_0'),
+        Markup.button.callback(`${isSell(1)}1%`, 'set_elys_sellfee_1'),
+        Markup.button.callback(`${isSell(2)}2%`, 'set_elys_sellfee_2'),
+        Markup.button.callback(`${isSell(3)}3%`, 'set_elys_sellfee_3'),
+        Markup.button.callback(`${isSell(5)}5%`, 'set_elys_sellfee_5'),
+        Markup.button.callback(`${isSell(10)}10%`, 'set_elys_sellfee_10')
+      ],
+      [
+        Markup.button.callback('🚀 Ke Panel Deploy', 'cmd_elysium_deploy_menu'),
+        Markup.button.callback('🪐 Menu Elysium', 'cmd_elysium_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
   async sendElysiumDeployMenu(ctx) {
     const info = await elysiumService.getDeployerInfo();
     const balNum = parseFloat(info.balanceHype) || 0;
@@ -2722,6 +2925,8 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
     const curDevBuy = storage.getElysiumDevBuyHype();
     const curPair = storage.getElysiumPairToken();
     const curDex = storage.getElysiumDexVersion().toUpperCase();
+    const curBuyFee = storage.getElysiumBuyFee();
+    const curSellFee = storage.getElysiumSellFee();
 
     const msg = 
 `🚀 <b>PANEL DEPLOY TOKEN KE ELYSIUM MAINNET</b>
@@ -2731,13 +2936,14 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
 • Trading Pair: <b>${curPair}</b>
 • Likuiditas (LP): <b>${curLp} HYPE / Quote</b>
 • Setting Dev Buy: <b>${curDevBuy > 0 ? `${curDevBuy} HYPE` : 'Nonaktif'}</b>
+• Fee Buy / Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (% dari total transaksi USD)
 
 💡 <b>Cara Deploy:</b>
 1️⃣ <b>Gunakan Perintah Cepat di Chat:</b>
 <code>/deployelysium &lt;Nama&gt; &lt;Ticker&gt; [LP] [Pair] [Fee%]</code>
 <i>Contoh:</i>
-• <code>/deployelysium PepeElysium PEPE</code> (Gunakan setting aktif)
-• <code>/deployelysium CyberDog CDOG ${curLp} USDC 5</code>
+• <code>/deployelysium PepeElysium PEPE</code> (Gunakan fee aktif: ${curBuyFee}%/${curSellFee}%)
+• <code>/deployelysium CyberDog CDOG ${curLp} USDC 3</code>
 • <code>/deployelysium RoboAI ROBO ${curLp} ETH 5</code>
 
 2️⃣ <b>Atau Pilih Preset di Bawah:</b>`;
@@ -2750,14 +2956,15 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
         Markup.button.callback(`⚡ Quick Deploy Token Demo (${curPair})`, 'cmd_elysium_quick_demo')
       ],
       [
+        Markup.button.callback(`🏷️ Fee: ${curBuyFee}% B / ${curSellFee}% S`, 'cmd_elysium_fee_menu'),
+        Markup.button.callback(`⚙️ LP & Dev Buy`, 'cmd_elysium_lp_menu')
+      ],
+      [
         Markup.button.callback(`🔄 Ganti Pair (${curPair})`, 'cmd_elysium_pair_menu'),
         Markup.button.callback(`🦄 Ganti DEX (${curDex})`, 'cmd_elysium_dex_menu')
       ],
       [
-        Markup.button.callback('⚙️ Ubah Setting LP & Dev Buy', 'cmd_elysium_lp_menu'),
-        Markup.button.callback('🪐 Radar Trending Elysium', 'cmd_trending_elysium')
-      ],
-      [
+        Markup.button.callback('🪐 Radar Trending Elysium', 'cmd_trending_elysium'),
         Markup.button.callback('⬅️ Kembali ke Menu Elysium', 'cmd_elysium_menu')
       ]
     ]);
@@ -2806,6 +3013,8 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
     const pairChoice = options.pair || storage.getElysiumPairToken() || 'HYPE';
     const dexVersion = options.dexVersion || storage.getElysiumDexVersion() || 'v4';
     const dexName = dexVersion.toLowerCase() === 'v4' ? 'Uniswap V4' : (dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2');
+    const curBuyFee = Number(options.buyFee !== undefined ? options.buyFee : storage.getElysiumBuyFee());
+    const curSellFee = Number(options.sellFee !== undefined ? options.sellFee : storage.getElysiumSellFee());
 
     const initialMsg = await ctx.replyWithHTML(
       `🪐 <b>MEMULAI DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
@@ -2816,7 +3025,7 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
       `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
       `• Likuiditas Pool: <b>${hypeLp} HYPE / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
       `• Dev Buy Otomatis: <b>${Number(devBuyHype) > 0 ? `${devBuyHype} HYPE` : 'Nonaktif'}</b>\n` +
-      `• Fee: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>\n` +
+      `• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (dari total transaksi USD)\n` +
       `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
       `⏳ <i>Langkah 1/9: Memeriksa saldo HYPE, quote token, &amp; parameter on-chain...</i>`
     );
@@ -2844,7 +3053,9 @@ Atur jumlah native gas <b>HYPE / Quote</b> yang disetor ke Pool Uniswap ${curDex
         pair: pairChoice,
         dexVersion,
         hypeLiquidity: hypeLp,
-        devBuyHype
+        devBuyHype,
+        buyFee: curBuyFee,
+        sellFee: curSellFee
       };
       const result = await elysiumService.deployToken(deployOptions, progressUpdates);
 
@@ -2867,9 +3078,9 @@ ${result.positionTokenId ? `• Position NFT: <b>${result.dexVersion} Position #
 • Harga Awal: <code>${result.liquidity.initialPrice} ${result.pairToken}</code>
 • Trading: <b>🟢 AKTIF (Bisa dibeli &amp; dijual langsung!)</b>
 
-🛡️ <b>Proteksi &amp; Pajak:</b>
-• Sniper Tax: <b>80% Buy Tax (30 Menit Pertama)</b>
-• Normal Tax: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>
+🛡️ <b>Proteksi &amp; Pajak (Dipotong dari Total USD):</b>
+• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (dari total order USD)
+• Sniper Protection: <b>80% Buy Tax (30 Menit Pertama)</b>
 ${result.lock.address ? `• Timelock: <code>${result.lock.address}</code> (${result.lock.amount} Token)\n` : ''}
 🔗 <b>Transaction Hashes:</b>
 • Deploy Token: <a href="${result.urls.tokenExplorer}">${result.token.deployTxHash.slice(0, 14)}...</a>

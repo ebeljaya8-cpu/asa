@@ -158,8 +158,8 @@ export class Storage {
       lockAddress: record.lockAddress || '',
       deployerAddress: record.deployerAddress,
       feeWallet: record.feeWallet || record.deployerAddress,
-      buyFee: record.buyFee || 5,
-      sellFee: record.sellFee || 5,
+      buyFee: record.buyFee !== undefined ? record.buyFee : 5,
+      sellFee: record.sellFee !== undefined ? record.sellFee : 5,
       dexVersion: record.dexVersion || 'Uniswap V4',
       pairToken: record.pairToken || 'HYPE',
       quoteDeposited: record.quoteDeposited || record.hypeDeposited || '0.0001',
@@ -217,8 +217,8 @@ export class Storage {
       poolAddress: record.poolAddress,
       deployerAddress: record.deployerAddress,
       feeWallet: record.feeWallet || record.deployerAddress,
-      buyFee: record.buyFee || 5,
-      sellFee: record.sellFee || 5,
+      buyFee: record.buyFee !== undefined ? record.buyFee : 5,
+      sellFee: record.sellFee !== undefined ? record.sellFee : 5,
       dexVersion: record.dexVersion || 'Uniswap V4',
       pairToken: record.pairToken || 'ETH',
       quoteDeposited: record.quoteDeposited || record.ethDeposited || '0.00001',
@@ -528,6 +528,42 @@ export class Storage {
     state.elysiumV3FeeTier = target;
     this.saveState(state);
     return target;
+  }
+
+  getElysiumBuyFee() {
+    const state = this.getState();
+    return state.elysiumBuyFee !== undefined ? state.elysiumBuyFee : (config.elysiumDefaultBuyFee !== undefined ? config.elysiumDefaultBuyFee : 5);
+  }
+
+  setElysiumBuyFee(fee) {
+    const num = Math.max(0, Math.min(25, parseFloat(fee) || 0));
+    const state = this.getState();
+    state.elysiumBuyFee = num;
+    this.saveState(state);
+    return num;
+  }
+
+  getElysiumSellFee() {
+    const state = this.getState();
+    return state.elysiumSellFee !== undefined ? state.elysiumSellFee : (config.elysiumDefaultSellFee !== undefined ? config.elysiumDefaultSellFee : 5);
+  }
+
+  setElysiumSellFee(fee) {
+    const num = Math.max(0, Math.min(25, parseFloat(fee) || 0));
+    const state = this.getState();
+    state.elysiumSellFee = num;
+    this.saveState(state);
+    return num;
+  }
+
+  setElysiumFees(buyFee, sellFee) {
+    const b = Math.max(0, Math.min(25, parseFloat(buyFee) || 0));
+    const s = Math.max(0, Math.min(25, parseFloat(sellFee) || 0));
+    const state = this.getState();
+    state.elysiumBuyFee = b;
+    state.elysiumSellFee = s;
+    this.saveState(state);
+    return { buyFee: b, sellFee: s };
   }
 
   getBaseDirectLpEth() {
