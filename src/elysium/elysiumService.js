@@ -225,6 +225,7 @@ export class ElysiumService {
     this.v4PositionManager = config.elysiumV4PositionManager || '0x1d1C51b9d07fD27d36412A2b66CC23D19Eb3E518';
     this.permit2Address = config.elysiumPermit2 || '0x000000000022D473030F116dDEE9F6B43aC78BA3';
     this.universalRouter = config.elysiumUniversalRouter || '0xA13f7611115752DEB2B13813BDDE16A5073e4b45';
+    this.v4DexRouter = config.elysiumV4DexRouter || '0x6c3C2eFa01a8240C00a683E36502F656f0c15Fd6';
 
     // Uniswap V3 Verified Contracts
     this.v3Factory = config.elysiumV3Factory || '0x1707327F626496A7b5b3872e7E4d2879Df7d7a9f';
@@ -1137,6 +1138,173 @@ export class ElysiumService {
       },
       record
     };
+  }
+
+  async getHarvestableTokens() {
+    const wallet = this.getDeployerWallet();
+    if (!wallet) return [];
+
+    const deployed = storage.getElysiumDeployedTokens();
+    const tokenAddresses = new Set();
+    deployed.forEach(t => {
+      if (t.tokenAddress) tokenAddresses.add(t.tokenAddress.toLowerCase());
+    });
+    // Known / user tokens fallback
+    tokenAddresses.add('0x2975075a7282ce8a8c27b0ecbf146ad56ce8993b');
+
+    const results = [];
+    for (const addr of tokenAddresses) {
+      try {
+        const tokenContract = new ethers.Contract(addr, [
+          'function name() view returns (string)',
+          'function symbol() view returns (string)',
+          'function balanceOf(address) view returns (uint256)'
+        ], wallet);
+
+        const [name, symbol, bal] = await Promise.all([
+          tokenContract.name().catch(() => 'Unknown'),
+          tokenContract.symbol().catch(() => 'TOKEN'),
+          tokenContract.balanceOf(wallet.address).catch(() => 0n)
+        ]);
+
+        if (bal > 0n) {
+          results.push({
+            address: ethers.getAddress(addr),
+            name,
+            symbol,
+            balanceRaw: bal.toString(),
+            balanceFormatted: Number(ethers.formatUnits(bal, 18)).toLocaleString('id-ID', { maximumFractionDigits: 2 }),
+            hasBalance: true
+          });
+        }
+      } catch (e) {
+        console.warn(`Error checking balance for ${addr}:`, e.message);
+      }
+    }
+    return results;
+  }
+
+  async harvestTokenToHype(options = {}) {
+    const wallet = this.getDeployerWallet();
+    if (!wallet) {
+      throw new Error('Wallet deployer Elysium tidak terkonfigurasi');
+    }
+
+    const tokenAddress = options.tokenAddress;
+    if (!tokenAddress || !ethers.isAddress(tokenAddress)) {
+      throw new Error('Alamat token tidak valid');
+    }
+
+    const tokenContract = new ethers.Contract(tokenAddress, [
+      'function name() view returns (string)',
+      'function symbol() view returns (string)',
+      'function balanceOf(address) view returns (uint256)',
+      'function allowance(address,address) view returns (uint256)',
+      'function approve(address,uint256) returns (bool)'
+    ], wallet);
+
+    const [name, symbol, tokenBal] = await Promise.all([
+      tokenContract.name().catch(() => 'Unknown'),
+      tokenContract.symbol().catch(() => 'TOKEN'),
+      tokenContract.balanceOf(wallet.address)
+    ]);
+
+    if (tokenBal === 0n) {
+      return {
+        success: false,
+        message: `Tidak ada saldo token ${symbol} untuk di-harvest di wallet deployer.`,
+        tokenAddress,
+        symbol,
+        tokensSwapped: '0',
+        hypeReceived: '0'
+      };
+    }
+
+    let amountToSwap = options.amount ? BigInt(options.amount) : tokenBal;
+    if (amountToSwap > tokenBal) {
+      amountToSwap = tokenBal;
+    }
+
+    if (amountToSwap === 0n) {
+      return {
+        success: false,
+        message: 'Nominal token 0.',
+        tokenAddress,
+        symbol,
+        tokensSwapped: '0',
+        hypeReceived: '0'
+      };
+    }
+
+    const routerAddr = this.v4DexRouter || '0x6c3C2eFa01a8240C00a683E36502F656f0c15Fd6';
+    const allowance = await tokenContract.allowance(wallet.address, routerAddr);
+    if (allowance < amountToSwap) {
+      const appTx = await tokenContract.approve(routerAddr, ethers.MaxUint256);
+      await appTx.wait();
+    }
+
+    const routerIface = new ethers.Interface([
+      'function swap((uint8 dexType, address tokenIn, address tokenOut, address pool, uint24 fee, int24 tickSpacing, address hook, bytes hookData, address recipient, bytes32 extraData)[] routes, address to, uint256 amountIn, uint256 minAmountOut, uint256 deadline)'
+    ]);
+
+    const route = [{
+      dexType: 2, // Uniswap V4
+      tokenIn: tokenAddress,
+      tokenOut: ethers.ZeroAddress, // Native HYPE
+      pool: ethers.ZeroAddress,
+      fee: 10000,
+      tickSpacing: 200,
+      hook: ethers.ZeroAddress,
+      hookData: '0x',
+      recipient: this.v4PoolManager,
+      extraData: ethers.ZeroHash
+    }];
+
+    const routerContract = new ethers.Contract(routerAddr, routerIface, wallet);
+    const deadline = Math.floor(Date.now() / 1000) + 600;
+
+    const balBefore = await this.provider.getBalance(wallet.address);
+    let gasLimit = 350000n;
+    try {
+      const estimated = await routerContract.swap.estimateGas(route, ethers.ZeroAddress, amountToSwap, 0n, deadline);
+      gasLimit = (estimated * 13n) / 10n;
+    } catch (e) {
+      console.warn('Gas estimation warning for harvest:', e.message);
+    }
+
+    const tx = await routerContract.swap(route, ethers.ZeroAddress, amountToSwap, 0n, deadline, { gasLimit });
+    const receipt = await tx.wait();
+
+    const balAfter = await this.provider.getBalance(wallet.address);
+    const hypeDiff = balAfter > balBefore ? (balAfter - balBefore) : 0n;
+
+    return {
+      success: true,
+      txHash: tx.hash,
+      tokenAddress,
+      name,
+      symbol,
+      tokensSwapped: ethers.formatUnits(amountToSwap, 18),
+      hypeReceived: ethers.formatEther(hypeDiff),
+      newHypeBalance: ethers.formatEther(balAfter),
+      explorerUrl: `${this.explorerUrl}/tx/${tx.hash}`
+    };
+  }
+
+  async autoHarvestAll() {
+    const list = await this.getHarvestableTokens();
+    const results = [];
+    for (const item of list) {
+      try {
+        const res = await this.harvestTokenToHype({ tokenAddress: item.address });
+        if (res.success && parseFloat(res.tokensSwapped) > 0) {
+          results.push(res);
+        }
+      } catch (err) {
+        console.warn(`[AutoHarvest] Gagal auto-harvest ${item.symbol}:`, err.message);
+      }
+    }
+    return results;
   }
 }
 

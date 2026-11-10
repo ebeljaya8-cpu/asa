@@ -566,6 +566,18 @@ export class Storage {
     return { buyFee: b, sellFee: s };
   }
 
+  getElysiumAutoHarvestHype() {
+    const state = this.getState();
+    return state.elysiumAutoHarvestHype !== undefined ? !!state.elysiumAutoHarvestHype : true;
+  }
+
+  setElysiumAutoHarvestHype(enabled) {
+    const state = this.getState();
+    state.elysiumAutoHarvestHype = !!enabled;
+    this.saveState(state);
+    return state.elysiumAutoHarvestHype;
+  }
+
   getBaseDirectLpEth() {
     const state = this.getState();
     return state.baseDirectLpEth !== undefined ? state.baseDirectLpEth : (config.baseDirectDefaultLpEth || 0.00001);

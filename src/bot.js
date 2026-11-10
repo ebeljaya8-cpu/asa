@@ -644,6 +644,38 @@ export class TelegramBotApp {
       );
     });
 
+    // /harvesthype, /elysharvest command (Convert fee tokens to native HYPE)
+    bot.command(['harvesthype', 'elysharvest', 'claimhype'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length > 0 && ethers.isAddress(parts[0])) {
+        const targetAddr = parts[0];
+        const statusMsg = await ctx.replyWithHTML(`⏳ <i>Memulai harvest token <code>${targetAddr}</code> ke koin HYPE...</i>`);
+        try {
+          const res = await elysiumService.harvestTokenToHype({ tokenAddress: targetAddr });
+          if (!res.success) {
+            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `⚠️ <b>Harvest Gagal:</b> ${escapeHtml(res.message)}`, { parse_mode: 'HTML' });
+          }
+          return ctx.telegram.editMessageText(
+            ctx.chat.id,
+            statusMsg.message_id,
+            null,
+            `🌾 <b>BERHASIL HARVEST FEE KE HYPE!</b>\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `• Token: <b>${escapeHtml(res.name)} ($${escapeHtml(res.symbol)})</b>\n` +
+            `• Token Diswap: <b>${Number(res.tokensSwapped).toLocaleString('id-ID', { maximumFractionDigits: 2 })} ${res.symbol}</b>\n` +
+            `• Koin HYPE Diterima: <b>+${parseFloat(res.hypeReceived).toFixed(6)} HYPE</b> (Langsung ke Dompet!)\n` +
+            `• Saldo HYPE Sekarang: <b>${parseFloat(res.newHypeBalance).toFixed(6)} HYPE</b>\n` +
+            `• Transaksi Elyscan: <a href="${res.explorerUrl}">Lihat Tx Elyscan</a>`,
+            { parse_mode: 'HTML', disable_web_page_preview: true }
+          );
+        } catch (err) {
+          return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ <b>Gagal harvest:</b> ${escapeHtml(err.message)}`, { parse_mode: 'HTML' });
+        }
+      }
+
+      await this.sendElysiumHarvestMenu(ctx);
+    });
+
     // /basemenu, /base, /basedirect command
     bot.command(['basemenu', 'base', 'basedirect'], async (ctx) => {
       await this.sendBaseDirectMenu(ctx);
@@ -1141,6 +1173,62 @@ export class TelegramBotApp {
       storage.setElysiumSellFee(s);
       await ctx.answerCbQuery(`Fee Jual Elysium diatur ke ${s}%!`).catch(() => {});
       await this.sendElysiumFeeMenu(ctx, true);
+    });
+
+    bot.action('cmd_elysium_harvest_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendElysiumHarvestMenu(ctx, true);
+    });
+
+    bot.action('toggle_elys_autoharvest', async (ctx) => {
+      const cur = storage.getElysiumAutoHarvestHype();
+      const updated = storage.setElysiumAutoHarvestHype(!cur);
+      await ctx.answerCbQuery(updated ? 'Auto-Convert ke HYPE DIAKTIFKAN!' : 'Auto-Convert ke HYPE DINONAKTIFKAN!').catch(() => {});
+      await this.sendElysiumHarvestMenu(ctx, true);
+    });
+
+    bot.action(/^act_harvest_(0x[a-fA-F0-9]{40})$/, async (ctx) => {
+      const addr = ctx.match[1];
+      await ctx.answerCbQuery('Memulai swap fee ke HYPE...').catch(() => {});
+      const statusMsg = await ctx.replyWithHTML(`⏳ <i>Sedang menukar token fee <code>${addr}</code> ke koin HYPE via Router Uniswap V4...</i>`);
+      try {
+        const res = await elysiumService.harvestTokenToHype({ tokenAddress: addr });
+        if (!res.success) {
+          return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `⚠️ ${escapeHtml(res.message)}`, { parse_mode: 'HTML' });
+        }
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `🎉 <b>SUKSES MENCAIRKAN FEE KE HYPE!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• Token: <b>${escapeHtml(res.name)} ($${escapeHtml(res.symbol)})</b>\n` +
+          `• Token Diswap: <b>${Number(res.tokensSwapped).toLocaleString('id-ID', { maximumFractionDigits: 2 })} ${res.symbol}</b>\n` +
+          `• Koin HYPE Diterima: <b>+${parseFloat(res.hypeReceived).toFixed(6)} HYPE</b> (Sudah masuk ke saldo wallet!)\n` +
+          `• Saldo HYPE Sekarang: <b>${parseFloat(res.newHypeBalance).toFixed(6)} HYPE</b>\n` +
+          `• Link Explorer: <a href="${res.explorerUrl}">Elyscan Tx</a>`,
+          { parse_mode: 'HTML', disable_web_page_preview: true }
+        );
+      } catch (err) {
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ <b>Gagal:</b> ${escapeHtml(err.message)}`, { parse_mode: 'HTML' });
+      }
+    });
+
+    bot.action('act_harvest_all', async (ctx) => {
+      await ctx.answerCbQuery('Memulai auto-harvest semua token...').catch(() => {});
+      const statusMsg = await ctx.replyWithHTML('⏳ <i>Sedang menukar semua saldo token fee ke koin HYPE...</i>');
+      try {
+        const results = await elysiumService.autoHarvestAll();
+        if (results.length === 0) {
+          return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, 'ℹ️ Tidak ada saldo token fee yang dapat dicairkan saat ini.', { parse_mode: 'HTML' });
+        }
+        let text = `🎉 <b>BERHASIL HARVEST ${results.length} TOKEN KE HYPE!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        for (const r of results) {
+          text += `• <b>${r.symbol}</b>: Diswap ${Number(r.tokensSwapped).toLocaleString('id-ID', { maximumFractionDigits: 0 })} $\\rightarrow$ <b>+${parseFloat(r.hypeReceived).toFixed(6)} HYPE</b> (<a href="${r.explorerUrl}">Tx</a>)\n`;
+        }
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, text, { parse_mode: 'HTML', disable_web_page_preview: true });
+      } catch (err) {
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ <b>Gagal:</b> ${escapeHtml(err.message)}`, { parse_mode: 'HTML' });
+      }
     });
 
     bot.action('cmd_elysium_pair_menu', async (ctx) => {
@@ -2657,6 +2745,7 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 • Likuiditas Pool (LP): <b>${curLp} HYPE / Quote</b> (0.0001 - 0.0002)
 • Dev Buy Otomatis: ${devBuyText}
 • Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (% dari total transaksi USD)
+• Penerimaan Fee: <b>⚡ Koin HYPE Asli</b> (Auto Swap-Back ke HYPE)
 • Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
 • Verifikasi Explorer: <b>100% Otomatis di Elyscan</b>
 • Total Token Dideploy: <b>${totalCount} token</b>
@@ -2674,13 +2763,14 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
       ],
       [
         Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_elysium_fee_menu'),
-        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu')
+        Markup.button.callback('🌾 Harvest Fee ke HYPE', 'cmd_elysium_harvest_menu')
       ],
       [
-        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_elysium_history'),
-        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_elysium_menu')
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu'),
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_elysium_history')
       ],
       [
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_elysium_menu'),
         Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
@@ -2905,11 +2995,66 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
         Markup.button.callback(`${isSell(10)}10%`, 'set_elys_sellfee_10')
       ],
       [
-        Markup.button.callback('🚀 Ke Panel Deploy', 'cmd_elysium_deploy_menu'),
+        Markup.button.callback('🌾 Harvest Fee ke HYPE', 'cmd_elysium_harvest_menu'),
+        Markup.button.callback('🚀 Ke Panel Deploy', 'cmd_elysium_deploy_menu')
+      ],
+      [
         Markup.button.callback('🪐 Menu Elysium', 'cmd_elysium_menu')
       ]
     ]);
 
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendElysiumHarvestMenu(ctx, isEdit = false) {
+    const list = await elysiumService.getHarvestableTokens();
+    const autoHarvest = storage.getElysiumAutoHarvestHype();
+    const info = await elysiumService.getDeployerInfo();
+    const hypeBal = parseFloat(info.balanceHype || 0).toFixed(6);
+
+    let msg = 
+`🌾 <b>PANEL HARVEST FEE KE NATIVE HYPE (ELYSIUM)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Fitur ini mencairkan (menukar) token fee sitaan (seperti Sniper Tax 80% dan Buy/Sell Fee) yang terkumpul di dompet Anda langsung menjadi <b>koin HYPE murni</b>!
+
+👛 <b>Saldo HYPE Deployer:</b> <b>${hypeBal} HYPE</b>
+⚡ <b>Status Auto-Convert HYPE:</b> <b>${autoHarvest ? '🟢 AKTIF (Otomatis ditukar)' : '🔴 NONAKTIF (Manual)'}</b>
+
+🪙 <b>Daftar Token dengan Saldo Fee Tersedia:</b>\n`;
+
+    const buttons = [];
+    if (list.length === 0) {
+      msg += `<i>Tidak ada saldo token fee yang siap di-harvest saat ini.</i>\n`;
+    } else {
+      for (const item of list) {
+        msg += `• <b>${escapeHtml(item.name)} ($${escapeHtml(item.symbol)})</b>: <code>${item.balanceFormatted}</code> token\n`;
+        buttons.push([
+          Markup.button.callback(`🌾 Cairkan Semua ${item.symbol} ke HYPE`, `act_harvest_${item.address}`)
+        ]);
+      }
+      buttons.push([
+        Markup.button.callback('🌾 Cairkan SEMUA Token Sekaligus ke HYPE', 'act_harvest_all')
+      ]);
+    }
+
+    msg += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💡 <i>Ketik <code>/harvesthype &lt;AlamatToken&gt;</code> untuk mencairkan secara spesifik.</i>`;
+
+    buttons.push([
+      Markup.button.callback(autoHarvest ? '⚡ Matikan Auto-Convert' : '⚡ Aktifkan Auto-Convert HYPE', 'toggle_elys_autoharvest'),
+      Markup.button.callback('🔄 Refresh', 'cmd_elysium_harvest_menu')
+    ]);
+    buttons.push([
+      Markup.button.callback('🪐 Menu Elysium', 'cmd_elysium_menu'),
+      Markup.button.callback('🏷️ Atur Fee', 'cmd_elysium_fee_menu')
+    ]);
+
+    const keyboard = Markup.inlineKeyboard(buttons);
     if (isEdit && ctx.callbackQuery) {
       try {
         return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
@@ -3560,12 +3705,45 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
     }
   }
 
+  startAutoHarvestWorker() {
+    if (this.harvestInterval) clearInterval(this.harvestInterval);
+    // Auto-Harvest check every 45 seconds for fee tokens to convert to HYPE
+    this.harvestInterval = setInterval(async () => {
+      try {
+        if (!storage.getElysiumAutoHarvestHype()) return;
+        const results = await elysiumService.autoHarvestAll();
+        if (results && results.length > 0) {
+          for (const res of results) {
+            console.log(`[AutoHarvest Elysium] Swapped ${res.tokensSwapped} ${res.symbol} for ${res.hypeReceived} HYPE (Tx: ${res.txHash})`);
+            if (this.mainChatId) {
+              await this.bot.telegram.sendMessage(
+                this.mainChatId,
+                `🌾 <b>[AUTO-HARVEST ELYSIUM] TAX DIKONVERSI KE HYPE!</b>\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `Pajak dari transaksi baru berhasil otomatis ditukar ke koin HYPE asli:\n\n` +
+                `• Token: <b>${escapeHtml(res.name)} ($${escapeHtml(res.symbol)})</b>\n` +
+                `• Nominal Token: <b>${Number(res.tokensSwapped).toLocaleString('id-ID', { maximumFractionDigits: 0 })} ${res.symbol}</b>\n` +
+                `• HYPE Diterima: <b>+${parseFloat(res.hypeReceived).toFixed(6)} HYPE</b> (Masuk ke Dompet!)\n` +
+                `• Saldo HYPE Sekarang: <b>${parseFloat(res.newHypeBalance).toFixed(6)} HYPE</b>\n` +
+                `• Elyscan: <a href="${res.explorerUrl}">Lihat Tx</a>`,
+                { parse_mode: 'HTML', disable_web_page_preview: true }
+              ).catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        // silent
+      }
+    }, 45000);
+  }
+
   async start() {
     if (!this.bot) return;
     try {
       console.log('Cleaning any stale webhooks...');
       await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
       console.log('Starting Telegram bot polling...');
+      this.startAutoHarvestWorker();
       await this.bot.launch();
       console.log('✅ Telegram Bot successfully started and listening for commands!');
     } catch (e) {
@@ -3575,6 +3753,7 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
 
   stop() {
     if (this.pollingInterval) clearInterval(this.pollingInterval);
+    if (this.harvestInterval) clearInterval(this.harvestInterval);
     vestingMonitor.stop();
     if (this.bot) this.bot.stop();
   }
