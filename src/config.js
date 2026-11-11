@@ -127,5 +127,10 @@ export const config = {
   elysiumDefaultSellFee: parseFloat(process.env.ELYSIUM_DEFAULT_SELL_FEE || '5'),
   elysiumDefaultLpHype: parseFloat(process.env.ELYSIUM_DEFAULT_LP_HYPE || '0.0001'),
   elysiumDevBuyHype: parseFloat(process.env.ELYSIUM_DEV_BUY_HYPE || '0.0001'),
-  elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000' // 100B
+  elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
+
+  // Respan AI Gateway (Gemini 4 Carbon Free)
+  respanApiKey: process.env.RESPAN_API_KEY || '',
+  respanGatewayUrl: process.env.RESPAN_GATEWAY_URL || 'https://gateway.respan.ai/v1/chat/completions',
+  respanModel: process.env.RESPAN_MODEL || 'respan/gemini-4-carbon:free'
 };

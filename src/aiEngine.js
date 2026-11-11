@@ -1,3 +1,4 @@
+import { config } from './config.js';
 import { storage } from './storage.js';
 import { clankerService } from './clankerService.js';
 import { trendingService } from './trendingService.js';
@@ -257,6 +258,147 @@ export class AIEngine {
       sourceNetwork: 'BASE',
       poolAddress: `ai_fallback_${Date.now()}`,
       description: `Base Alpha ${fallbackUid} is an autonomous digital asset deployed natively on Base.`
+    };
+  }
+
+  /**
+   * Respan AI Gateway caller (using model: respan/gemini-4-carbon:free or custom)
+   */
+  async callRespanAI(messages, options = {}) {
+    const apiKey = storage.getRespanApiKey() || config.respanApiKey;
+    if (!apiKey) {
+      throw new Error('RESPAN_API_KEY belum dikonfigurasi. Silakan pasang via /setrespan <api_key> di bot atau di file .env');
+    }
+
+    const gatewayUrl = config.respanGatewayUrl || 'https://gateway.respan.ai/v1/chat/completions';
+    const model = storage.getRespanModel() || config.respanModel || 'respan/gemini-4-carbon:free';
+
+    const payload = {
+      model,
+      messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.max_tokens ?? 1024
+    };
+
+    const response = await fetch(gatewayUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(45000)
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data) {
+      const errMsg = data?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(`Respan AI Gateway Error: ${errMsg}`);
+    }
+
+    if (data.error) {
+      throw new Error(`Respan AI Error: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error('Respan AI Gateway memberikan respon kosong.');
+    }
+
+    return content;
+  }
+
+  /**
+   * Universal Web3 / Crypto AI Chat using Respan Gemini 4 Carbon
+   */
+  async askAI(prompt, systemInstruction = '') {
+    const systemPrompt = systemInstruction || 
+      'Kamu adalah ASA AI, asisten dan analis crypto alpha cerdas dari bot Clanker & Elysium Launchpad. ' +
+      'Berikan jawaban yang tajam, akurat, informatif, dan ringkas mengenai Web3, DeFi, memecoin, likuiditas on-chain (Base & Elysium Network), smart contracts, dan tren crypto terkini. ' +
+      'Gunakan format teks yang rapi dan mudah dibaca (bullet points jika perlu).';
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt }
+    ];
+
+    return await this.callRespanAI(messages, { temperature: 0.7, max_tokens: 1500 });
+  }
+
+  /**
+   * Generate creative viral memecoin identity using Respan Gemini 4 Carbon
+   */
+  async generateMemeTokenWithAI(topicOrTheme = '', network = 'ELYSIUM') {
+    const defaultLogo = 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/295953fa-15ed-4d3c-241d-b6c1758c6200/original';
+    
+    try {
+      const promptText = topicOrTheme
+        ? `Buatkan konsep memecoin viral berbasis tema/topik: "${topicOrTheme}".`
+        : `Buatkan konsep memecoin viral yang sangat lucu, kreatif, dan berpotensi FOMO tinggi untuk jaringan ${network}.`;
+
+      const systemPrompt = 
+        'Kamu adalah AI Creative Memecoin Architect kelas dunia. Tugasmu adalah merancang identitas memecoin yang unik, viral, dan belum pernah ada.\n' +
+        'KEMBALIKAN HANYA FORMAT JSON MURNI (tanpa markdown ```json, tanpa komentar tambahan):\n' +
+        '{\n' +
+        '  "name": "Nama Keren Memecoin (Maksimal 3 kata)",\n' +
+        '  "symbol": "TICKER (3-6 karakter huruf kapital)",\n' +
+        '  "description": "Deskripsi memikat, lucu, atau narasi alpha yang mengundang komunitas untuk bergabung (2-3 kalimat)",\n' +
+        '  "theme": "Tema utama (misal: AI Meme, Cat/Dog, Cyberpunk, DeFi Degens, dsb)"\n' +
+        '}';
+
+      const aiResponse = await this.callRespanAI([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: promptText }
+      ], { temperature: 0.8, max_tokens: 600 });
+
+      // Clean response string in case markdown fences are present
+      let cleaned = aiResponse.trim();
+      if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      }
+
+      if (parsed && parsed.name && parsed.symbol) {
+        let symbol = String(parsed.symbol).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (symbol.length > 6) symbol = symbol.slice(0, 6);
+        if (symbol.length < 3) symbol = (symbol + 'X').slice(0, 4);
+
+        let name = String(parsed.name).trim();
+        if (name.length > 30) name = name.slice(0, 30);
+
+        return {
+          name,
+          symbol,
+          description: parsed.description || `${name} ($${symbol}) - Viral community memecoin natively engineered for ${network}.`,
+          theme: parsed.theme || topicOrTheme || 'AI Alpha Meme',
+          imageUrl: defaultLogo,
+          network,
+          sourceType: 'Respan Gemini 4 Carbon AI',
+          sourceNetwork: network.toUpperCase()
+        };
+      }
+    } catch (err) {
+      console.warn('[AI Engine] Failed to generate meme token via Respan AI, falling back to autonomous candidate generator:', err.message);
+    }
+
+    // Fallback if Respan key is not set or network fails
+    const fallback = this.generateDistinctAlphaCandidate();
+    return {
+      name: fallback.name,
+      symbol: fallback.symbol,
+      description: fallback.description,
+      theme: 'Autonomous Alpha Generator',
+      imageUrl: fallback.imageUrl,
+      network,
+      sourceType: 'AI Autonomous Engine (Fallback)',
+      sourceNetwork: network.toUpperCase()
     };
   }
 }

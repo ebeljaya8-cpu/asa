@@ -35,6 +35,7 @@ export class TelegramBotApp {
     this.pollingInterval = null;
     this.isProcessingCandidate = false;
     this.trendingCache = [];
+    this.latestAIToken = null;
   }
 
   init() {
@@ -123,11 +124,18 @@ export class TelegramBotApp {
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 <b>RESPAN AI GATEWAY (GEMINI 4 CARBON):</b>
+• <code>/ai &lt;pertanyaan&gt;</code> - Tanya AI tentang alpha, DeFi, crypto, & analisa pasar
+• <code>/aitoken [tema/topik]</code> - Buat ide token memecoin viral otomatis pakai Gemini AI (+ tombol deploy langsung)
+• <code>/setrespan &lt;api_key&gt;</code> - Pasang API Key Respan (aman & auto-delete chat)
+• <code>/setmodel &lt;model&gt;</code> - Ganti model AI (default: <code>respan/gemini-4-carbon:free</code>)
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>Fitur Unggulan Baru:</b>
-1. <b>🪐 Elysium Mainnet Launchpad:</b> Deploy token ERC-20 mandiri ke Elysium Mainnet (Chain 99901, gas HYPE), otomatis set up Uniswap V4 pool (Pair HYPE/ETH/USDC/WETH), upload logo ke IPFS via Pinata (seperti di Clanker), proteksi sniper 80% buy tax 30 menit, dan 100% verifikasi otomatis di Elyscan!
-2. <b>Multi-Wallet Simultan:</b> Menjalankan 3 wallet secara bersamaan di Base Network, masing-masing mendeploy token berbeda tanpa duplikasi!
-3. <b>Radar Hype Terlengkap:</b> Memantau OKX Web3 Hot Tokens & Social Hype, Elysium DEX, Clanker.world, DexScreener, GeckoTerminal, dan Pump.fun!
-4. <b>Kontrol Terpisah Telegram:</b> Atur saldo, private key, dan auto-deploy masing-masing wallet secara mandiri lewat dashboard!`;
+1. <b>🤖 Integrasi Respan Gemini AI:</b> Generator ide token memecoin viral otomatis & analis Web3 cerdas via Respan AI Gateway!
+2. <b>🪐 Elysium Mainnet Launchpad:</b> Deploy token ERC-20 mandiri ke Elysium Mainnet (Chain 99901, gas HYPE), otomatis set up Uniswap V4 pool (Pair HYPE/ETH/USDC/WETH), upload logo ke IPFS via Pinata (seperti di Clanker), proteksi sniper 80% buy tax 30 menit, dan 100% verifikasi otomatis di Elyscan!
+3. <b>Multi-Wallet Simultan:</b> Menjalankan 3 wallet secara bersamaan di Base Network, masing-masing mendeploy token berbeda tanpa duplikasi!
+4. <b>Radar Hype Terlengkap:</b> Memantau OKX Web3 Hot Tokens & Social Hype, Elysium DEX, Clanker.world, DexScreener, GeckoTerminal, dan Pump.fun!
+5. <b>Kontrol Terpisah Telegram:</b> Atur saldo, private key, dan auto-deploy masing-masing wallet secara mandiri lewat dashboard!`;
 
       await ctx.replyWithHTML(helpMsg, Markup.inlineKeyboard([
         [Markup.button.callback('👛 Kelola 3 Wallet', 'cmd_wallets_menu')],
@@ -261,9 +269,37 @@ export class TelegramBotApp {
       await this.sendGasMenu(ctx);
     });
 
-    // /ai or /market command (Autonomous AI Market Intelligence)
-    bot.command(['ai', 'market'], async (ctx) => {
+    // /ai, /askai, /gemini command (Respan Gemini AI Chat & Analysis)
+    bot.command(['ai', 'askai', 'gemini'], async (ctx) => {
+      const parts = (ctx.message?.text || '').trim().split(/\s+/).slice(1);
+      if (parts.length > 0) {
+        const prompt = parts.join(' ');
+        await this.handleAskAI(ctx, prompt);
+      } else {
+        await this.sendAIMenu(ctx);
+      }
+    });
+
+    // /market command (Autonomous AI Market Intelligence)
+    bot.command('market', async (ctx) => {
       await this.sendAIMenu(ctx);
+    });
+
+    // /aitoken, /createtoken, /aimeme command (AI Creative Meme Token Concept)
+    bot.command(['aitoken', 'createtoken', 'aimeme'], async (ctx) => {
+      const parts = (ctx.message?.text || '').trim().split(/\s+/).slice(1);
+      const topic = parts.join(' ');
+      await this.handleAITokenCreation(ctx, topic);
+    });
+
+    // /setrespan command (Set Respan AI Gateway API Key securely)
+    bot.command(['setrespan', 'setrespanapikey'], async (ctx) => {
+      await this.handleSetRespanCommand(ctx);
+    });
+
+    // /setmodel command (Set Respan AI Model)
+    bot.command(['setmodel', 'setaimodel'], async (ctx) => {
+      await this.handleSetModelCommand(ctx);
     });
 
     // /x or /alpha command (X / Twitter Radar)
@@ -1098,6 +1134,61 @@ export class TelegramBotApp {
       await this.sendAIMenu(ctx);
     });
 
+    bot.action('cmd_ai_generate_new', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.handleAITokenCreation(ctx, '');
+    });
+
+    bot.action('cmd_ai_setkey_info', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.handleSetRespanCommand(ctx);
+    });
+
+    bot.action('cmd_ai_deploy_elysium', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await this.executeDeployElysium(ctx, {
+        name: t.name,
+        symbol: t.symbol,
+        imageUrl: t.imageUrl,
+        pair: storage.getElysiumPairToken(),
+        hypeLiquidity: String(storage.getElysiumLpHype()),
+        buyFee: storage.getElysiumBuyFee(),
+        sellFee: storage.getElysiumSellFee()
+      });
+    });
+
+    bot.action('cmd_ai_deploy_base', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await this.executeDeployBaseDirect(ctx, {
+        name: t.name,
+        symbol: t.symbol,
+        imageUrl: t.imageUrl,
+        pair: storage.getBaseDirectPairToken(),
+        ethLiquidity: String(storage.getBaseDirectLpEth()),
+        buyFee: 5,
+        sellFee: 5
+      });
+    });
+
+    bot.action('cmd_ai_deploy_clanker', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await ctx.replyWithHTML(`⏳ <i>Memulai deploy simultan ${escapeHtml(t.name)} ($${escapeHtml(t.symbol)}) ke Wallet Base via Clanker...</i>`);
+      const results = await clankerService.deployManualTokenAcrossWallets(t);
+      await this.sendManualMultiWalletDeploySummary(ctx, t, results);
+    });
+
     bot.action('cmd_x_radar', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendXRadarMenu(ctx);
@@ -1531,6 +1622,10 @@ ${walletsOverview}
         Markup.button.callback('🪐 Elysium Hub & Deploy', 'cmd_elysium_menu')
       ],
       [
+        Markup.button.callback('🧠 AI Brain & Respan Gemini', 'cmd_ai_menu'),
+        Markup.button.callback('🎨 Buat Token AI (/aitoken)', 'cmd_ai_generate_new')
+      ],
+      [
         Markup.button.callback('👛 Kelola 3 Wallet Terpisah', 'cmd_wallets_menu'),
         Markup.button.callback('🚀 Deploy 3 Wallet Sekaligus', 'cmd_deploy_all_wallets')
       ],
@@ -1756,9 +1851,18 @@ Pilih fee transaksi yang akan diterapkan pada setiap token baru yang dideploy:
 
     const heatBar = '🟩'.repeat(Math.round(analysis.heatScore / 10)) + '⬜'.repeat(10 - Math.round(analysis.heatScore / 10));
 
+    const respanKey = storage.getRespanApiKey();
+    const maskedKey = respanKey ? `${respanKey.slice(0, 6)}...${respanKey.slice(-4)}` : 'Belum diatur (/setrespan)';
+    const respanModel = storage.getRespanModel();
+
     const msg = 
 `🧠 <b>AI AUTONOMOUS MARKET BRAIN &amp; SENTIMEN ON-CHAIN</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 <b>Respan AI Gateway (Gemini 4 Carbon):</b>
+• Status API: <b>${respanKey ? '🟢 Terhubung' : '🔴 Belum Diatur'}</b> (<code>${maskedKey}</code>)
+• Model Aktif: <code>${escapeHtml(respanModel)}</code>
+• Fitur: <i>Chat AI (<code>/ai &lt;pertanyaan&gt;</code>), Pembuat Konsep Token (<code>/aitoken</code>)</i>
+
 📊 <b>Indeks Kehangatan Pasar (Market Heat):</b>
 • Skor: <b>${analysis.heatScore}/100</b> [${heatBar}]
 • Status Pasar: <b>${analysis.stateEmoji} ${analysis.marketState}</b>
@@ -1776,6 +1880,10 @@ Pilih fee transaksi yang akan diterapkan pada setiap token baru yang dideploy:
 👇 <i>Pilihan Aksi AI:</i>`;
 
     await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🎨 Buat Konsep Token AI Baru', 'cmd_ai_generate_new'),
+        Markup.button.callback('🔑 Info / Set API Key', 'cmd_ai_setkey_info')
+      ],
       [
         Markup.button.callback('🔥 Scan Trending Pasar Sekarang', 'cmd_trending_all'),
         Markup.button.callback('🐦 Cek X / Twitter Alpha', 'cmd_x_radar')
@@ -2621,6 +2729,143 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
       await ctx.replyWithHTML(msg, { disable_web_page_preview: true });
     } else {
       await ctx.replyWithHTML(`❌ <b>Deploy via Wallet ${idx} gagal:</b> ${escapeHtml(res.error || 'Unknown error')}`);
+    }
+  }
+
+  async handleSetRespanCommand(ctx) {
+    const text = (ctx.message?.text || '').trim();
+    const parts = text.split(/\s+/);
+    const key = parts[1]?.trim();
+
+    // Auto-delete user message containing the key immediately for security
+    try {
+      await ctx.deleteMessage().catch(() => {});
+    } catch (e) {}
+
+    if (!key) {
+      const current = storage.getRespanApiKey();
+      const masked = current ? `${current.slice(0, 6)}...${current.slice(-4)}` : 'Belum diatur';
+      return ctx.replyWithHTML(
+        `🔑 <b>KONFIGURASI RESPAN AI GATEWAY:</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Status API Key: <code>${masked}</code>\n` +
+        `• Model Aktif: <code>${escapeHtml(storage.getRespanModel())}</code>\n` +
+        `• Gateway URL: <code>${escapeHtml(config.respanGatewayUrl)}</code>\n\n` +
+        `<i>Untuk memasang atau mengganti API Key, kirimkan:</i>\n` +
+        `<code>/setrespan YOUR_RESPAN_API_KEY</code>\n\n` +
+        `🛡️ <b>Keamanan Terjamin:</b> Pesan yang berisi API key Anda akan otomatis dihapus oleh bot seketika setelah diterima demi privasi.`
+      );
+    }
+
+    try {
+      storage.setRespanApiKey(key);
+      const masked = `${key.slice(0, 6)}...${key.slice(-4)}`;
+      await ctx.replyWithHTML(
+        `✅ <b>RESPAN API KEY BERHASIL DISIMPAN!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• API Key: <code>${masked}</code>\n` +
+        `• Model: <code>${escapeHtml(storage.getRespanModel())}</code>\n` +
+        `• Gateway: <code>${escapeHtml(config.respanGatewayUrl)}</code>\n\n` +
+        `✨ Sekarang Anda dapat menggunakan:\n` +
+        `• <code>/ai &lt;pertanyaan&gt;</code> - Tanya AI tentang crypto, DeFi, & analisis pasar\n` +
+        `• <code>/aitoken [topik]</code> - Buat ide token memecoin viral otomatis\n` +
+        `• Pesan Anda telah dihapus otomatis demi keamanan & privasi.`
+      );
+    } catch (err) {
+      await ctx.reply(`❌ Gagal menyimpan API key: ${err.message}`);
+    }
+  }
+
+  async handleSetModelCommand(ctx) {
+    const text = (ctx.message?.text || '').trim();
+    const parts = text.split(/\s+/).slice(1);
+    if (parts.length > 0) {
+      const newModel = parts[0].trim();
+      const saved = storage.setRespanModel(newModel);
+      await ctx.replyWithHTML(
+        `✅ <b>Model Respan AI berhasil diubah!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Model Aktif: <code>${escapeHtml(saved)}</code>`
+      );
+    } else {
+      const current = storage.getRespanModel();
+      await ctx.replyWithHTML(
+        `🤖 <b>PENGATURAN MODEL AI RESPAN:</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Model Aktif: <code>${escapeHtml(current)}</code>\n\n` +
+        `<i>Format penggunaan:</i>\n` +
+        `<code>/setmodel respan/gemini-4-carbon:free</code>`
+      );
+    }
+  }
+
+  async handleAskAI(ctx, prompt) {
+    const statusMsg = await ctx.reply('🤖 <i>Sedang menganalisis & memproses via Respan Gemini 4 Carbon...</i>', { parse_mode: 'HTML' });
+    try {
+      const answer = await aiEngine.askAI(prompt);
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+
+      // Telegram limit is 4096 characters per message
+      const maxLen = 4000;
+      if (answer.length <= maxLen) {
+        return await ctx.reply(answer);
+      }
+
+      let remaining = answer;
+      while (remaining.length > 0) {
+        if (remaining.length <= maxLen) {
+          await ctx.reply(remaining);
+          break;
+        }
+        let splitIdx = remaining.lastIndexOf('\n', maxLen);
+        if (splitIdx === -1 || splitIdx < 1000) splitIdx = maxLen;
+        await ctx.reply(remaining.substring(0, splitIdx));
+        remaining = remaining.substring(splitIdx).trim();
+      }
+    } catch (err) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+      await ctx.replyWithHTML(
+        `❌ <b>Respan AI Error:</b>\n<code>${escapeHtml(err.message)}</code>\n\n` +
+        `<i>Pastikan RESPAN_API_KEY sudah dipasang via <code>/setrespan &lt;api_key&gt;</code>.</i>`
+      );
+    }
+  }
+
+  async handleAITokenCreation(ctx, topic = '') {
+    const statusMsg = await ctx.reply('🎨 <i>AI sedang merancang konsep memecoin viral, ticker unik, dan narasi alpha via Respan Gemini 4 Carbon...</i>', { parse_mode: 'HTML' });
+    try {
+      const token = await aiEngine.generateMemeTokenWithAI(topic, 'ELYSIUM');
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+
+      this.latestAIToken = token;
+
+      const caption = 
+`💎 <b>KONSEP MEMECOIN HASIL KREASI AI (GEMINI 4 CARBON):</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Nama:</b> <code>${escapeHtml(token.name)}</code>
+🏷️ <b>Ticker:</b> <code>$${escapeHtml(token.symbol)}</code>
+🎭 <b>Tema / Kategori:</b> <i>${escapeHtml(token.theme || 'Viral Memecoin')}</i>
+📝 <b>Narasi / Lore:</b>
+<i>"${escapeHtml(token.description)}"</i>
+
+💡 <i>Sumber: ${escapeHtml(token.sourceType)}</i>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 <b>Siap Dideploy Kapan Saja! Pilih Jaringan / Cara Deploy:</b>`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🪐 Deploy ke Elysium (Uniswap V4)`, 'cmd_ai_deploy_elysium')
+        ],
+        [
+          Markup.button.callback(`🔵 Deploy ke Base Mandiri (Uniswap V4)`, 'cmd_ai_deploy_base'),
+          Markup.button.callback(`🚀 Deploy via Clanker (Base)`, 'cmd_ai_deploy_clanker')
+        ],
+        [
+          Markup.button.callback('🎲 Buat Konsep AI Baru', 'cmd_ai_generate_new'),
+          Markup.button.callback('⬅️ Menu AI', 'cmd_ai_menu')
+        ]
+      ]);
+
+      await ctx.replyWithHTML(caption, keyboard);
+    } catch (err) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+      await ctx.replyWithHTML(`❌ <b>Gagal membuat ide token AI:</b>\n<code>${escapeHtml(err.message)}</code>`);
     }
   }
 

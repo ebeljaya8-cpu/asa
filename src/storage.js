@@ -578,6 +578,30 @@ export class Storage {
     return state.elysiumAutoHarvestHype;
   }
 
+  getRespanApiKey() {
+    const state = this.getState();
+    return state.respanApiKey || config.respanApiKey || '';
+  }
+
+  setRespanApiKey(key) {
+    const state = this.getState();
+    state.respanApiKey = (key || '').trim();
+    this.saveState(state);
+    return state.respanApiKey;
+  }
+
+  getRespanModel() {
+    const state = this.getState();
+    return state.respanModel || config.respanModel || 'respan/gemini-4-carbon:free';
+  }
+
+  setRespanModel(model) {
+    const state = this.getState();
+    state.respanModel = (model || '').trim();
+    this.saveState(state);
+    return state.respanModel;
+  }
+
   getBaseDirectLpEth() {
     const state = this.getState();
     return state.baseDirectLpEth !== undefined ? state.baseDirectLpEth : (config.baseDirectDefaultLpEth || 0.00001);
