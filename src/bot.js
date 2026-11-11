@@ -3020,16 +3020,16 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
     let msg = 
 `🌾 <b>PANEL HARVEST FEE KE NATIVE HYPE (ELYSIUM)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Fitur ini mencairkan (menukar) token fee sitaan (seperti Sniper Tax 80% dan Buy/Sell Fee) yang terkumpul di dompet Anda langsung menjadi <b>koin HYPE murni</b>!
+🛡️ <b>Proteksi Dompet:</b> Saldo DevBuy dan token cadangan di wallet deployer Anda <b>100% AMAN &amp; DILINDUNGI</b> (bot dilarang keras menjual token milik dev!).
 
 👛 <b>Saldo HYPE Deployer:</b> <b>${hypeBal} HYPE</b>
-⚡ <b>Status Auto-Convert HYPE:</b> <b>${autoHarvest ? '🟢 AKTIF (Otomatis ditukar)' : '🔴 NONAKTIF (Manual)'}</b>
+⚡ <b>Status Auto-Convert HYPE:</b> <b>🔴 NONAKTIF (Aman)</b>
 
 🪙 <b>Daftar Token dengan Saldo Fee Tersedia:</b>\n`;
 
     const buttons = [];
     if (list.length === 0) {
-      msg += `<i>Tidak ada saldo token fee yang siap di-harvest saat ini.</i>\n`;
+      msg += `<i>Tidak ada saldo token fee kontrak yang perlu di-harvest saat ini. Seluruh token DevBuy Anda aman di wallet.</i>\n`;
     } else {
       for (const item of list) {
         msg += `• <b>${escapeHtml(item.name)} ($${escapeHtml(item.symbol)})</b>: <code>${item.balanceFormatted}</code> token\n`;
@@ -3707,34 +3707,7 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
 
   startAutoHarvestWorker() {
     if (this.harvestInterval) clearInterval(this.harvestInterval);
-    // Auto-Harvest check every 45 seconds for fee tokens to convert to HYPE
-    this.harvestInterval = setInterval(async () => {
-      try {
-        if (!storage.getElysiumAutoHarvestHype()) return;
-        const results = await elysiumService.autoHarvestAll();
-        if (results && results.length > 0) {
-          for (const res of results) {
-            console.log(`[AutoHarvest Elysium] Swapped ${res.tokensSwapped} ${res.symbol} for ${res.hypeReceived} HYPE (Tx: ${res.txHash})`);
-            if (this.mainChatId) {
-              await this.bot.telegram.sendMessage(
-                this.mainChatId,
-                `🌾 <b>[AUTO-HARVEST ELYSIUM] TAX DIKONVERSI KE HYPE!</b>\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `Pajak dari transaksi baru berhasil otomatis ditukar ke koin HYPE asli:\n\n` +
-                `• Token: <b>${escapeHtml(res.name)} ($${escapeHtml(res.symbol)})</b>\n` +
-                `• Nominal Token: <b>${Number(res.tokensSwapped).toLocaleString('id-ID', { maximumFractionDigits: 0 })} ${res.symbol}</b>\n` +
-                `• HYPE Diterima: <b>+${parseFloat(res.hypeReceived).toFixed(6)} HYPE</b> (Masuk ke Dompet!)\n` +
-                `• Saldo HYPE Sekarang: <b>${parseFloat(res.newHypeBalance).toFixed(6)} HYPE</b>\n` +
-                `• Elyscan: <a href="${res.explorerUrl}">Lihat Tx</a>`,
-                { parse_mode: 'HTML', disable_web_page_preview: true }
-              ).catch(() => {});
-            }
-          }
-        }
-      } catch (err) {
-        // silent
-      }
-    }, 45000);
+    // Dinonaktifkan: Saldo wallet deployer dan hasil devbuy tidak boleh di-harvest secara otomatis
   }
 
   async start() {
@@ -3743,7 +3716,6 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
       console.log('Cleaning any stale webhooks...');
       await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
       console.log('Starting Telegram bot polling...');
-      this.startAutoHarvestWorker();
       await this.bot.launch();
       console.log('✅ Telegram Bot successfully started and listening for commands!');
     } catch (e) {
