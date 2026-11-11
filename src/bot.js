@@ -1314,6 +1314,23 @@ export class TelegramBotApp {
       });
     });
 
+    bot.action('cmd_ai_deploy_robinhood', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await this.executeDeployRobinhood(ctx, {
+        name: t.name,
+        symbol: t.symbol,
+        imageUrl: t.imageUrl,
+        pair: storage.getRobinhoodPairToken(),
+        ethLiquidity: String(storage.getRobinhoodLpEth()),
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee()
+      });
+    });
+
     bot.action('cmd_ai_deploy_base', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       if (!this.latestAIToken) {
@@ -2540,11 +2557,24 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
 • Link Asal: <a href="${escapeHtml(token.sourceUrl)}">Info Pool / Token</a>`;
 
         const buttons = [];
-        if (category === 'elysium' || category === 'elys' || token.sourceNetwork?.toLowerCase() === 'elysium') {
+        const srcNet = (token.sourceNetwork || '').toLowerCase();
+        if (category === 'robinhood' || category === 'rh' || srcNet.includes('robinhood')) {
+          buttons.push([Markup.button.callback(`🏹 Deploy ke Robinhood Mainnet`, `d_rh_${index}`)]);
+          buttons.push([
+            Markup.button.callback(`⚡ Deploy Mandiri (Base)`, `d_basedir_${index}`),
+            Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
+          ]);
+          buttons.push([
+            Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`)
+          ]);
+        } else if (category === 'elysium' || category === 'elys' || srcNet === 'elysium') {
           buttons.push([Markup.button.callback(`🪐 Deploy ke Elysium Mainnet`, `d_elys_${index}`)]);
           buttons.push([
             Markup.button.callback(`⚡ Deploy Mandiri (Base)`, `d_basedir_${index}`),
             Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
+          ]);
+          buttons.push([
+            Markup.button.callback(`🏹 Deploy ke Robinhood`, `d_rh_${index}`)
           ]);
         } else {
           buttons.push([
@@ -2552,7 +2582,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
             Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
           ]);
           buttons.push([
-            Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`)
+            Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`),
+            Markup.button.callback(`🏹 Deploy ke Robinhood`, `d_rh_${index}`)
           ]);
         }
 
@@ -3141,7 +3172,8 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
 
       const keyboard = Markup.inlineKeyboard([
         [
-          Markup.button.callback(`🪐 Deploy ke Elysium (Uniswap V4)`, 'cmd_ai_deploy_elysium')
+          Markup.button.callback(`🪐 Deploy ke Elysium`, 'cmd_ai_deploy_elysium'),
+          Markup.button.callback(`🏹 Deploy ke Robinhood`, 'cmd_ai_deploy_robinhood')
         ],
         [
           Markup.button.callback(`🔵 Deploy ke Base Mandiri (Uniswap V4)`, 'cmd_ai_deploy_base'),
