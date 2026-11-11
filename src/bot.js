@@ -10,6 +10,7 @@ import { aiEngine } from './aiEngine.js';
 import { xRadarService } from './xRadarService.js';
 import { elysiumService } from './elysium/elysiumService.js';
 import { baseDeployService } from './base/baseDeployService.js';
+import { robinhoodService } from './robinhood/robinhoodService.js';
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -121,6 +122,14 @@ export class TelegramBotApp {
 • <code>/elysiumdex [v4|v3|v2]</code> - Atur DEX Engine (Uniswap V4 Standar / V3 / V2)
 • <code>/elysiumlp [0.0001-0.0002]</code> - Atur likuiditas pool awal HYPE (0.0001 s/d 0.0002 HYPE)
 • <code>/devbuyelys [0.0001|off]</code> - Atur dev buy otomatis sesaat setelah trading dibuka (0.0001 HYPE)
+• <code>/robinhood</code> - Dashboard &amp; Launchpad Robinhood Chain (Chain ID 4663, Gas ETH)
+• <code>/deployrobinhood &lt;Nama&gt; &lt;Ticker&gt; [Pair] [LpEth] [Fee%] [ImageUrl]</code> - Deploy token ke Robinhood (Uniswap V4/V3)
+• <code>/rhpair [eth|weth|usdg]</code> - Atur trading pair Robinhood
+• <code>/rhdex [v4|v3]</code> - Atur DEX Engine Robinhood
+• <code>/rhlp [0.000001-0.002]</code> - Atur likuiditas pool awal ETH Robinhood
+• <code>/devbuyrh [0.000001|off]</code> - Atur dev buy otomatis ETH Robinhood
+• <code>/rhfee [buy%] [sell%]</code> / <code>/rhbuyfee</code> / <code>/rhsellfee</code> - Atur fee beli &amp; jual Robinhood
+• <code>/rhhistory</code> - Riwayat token deploy di Robinhood Chain
 • <code>/history</code> - Riwayat token yang berhasil dideploy
 • <code>/settings</code> - Detail parameter tokenomics & fee
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -857,6 +866,150 @@ export class TelegramBotApp {
       await this.sendBaseDirectHistory(ctx);
     });
 
+    // ===== ROBINHOOD CHAIN COMMANDS =====
+    bot.command(['robinhood', 'rh', 'rhub'], async (ctx) => {
+      await this.sendRobinhoodMenu(ctx);
+    });
+
+    bot.command(['deployrobinhood', 'deployrh', 'rhdeployer', 'rhdeply'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length < 2) {
+        return ctx.replyWithHTML(
+          '⚠️ <b>Format: /deployrobinhood [Nama] [TICKER] [Pair] [LpETH] [Fee%] [ImageUrl]</b>\n\n' +
+          'Contoh:\n' +
+          '<code>/deployrobinhood MoonToken MOON ETH 0.00001 5</code>\n' +
+          '<code>/deployrobinhood RhToken RHT USDG 0.00005 3 https://i.imgur.com/xxx.png</code>\n\n' +
+          'Atau tekan tombol <b>🏹 Robinhood Hub</b> di menu utama.'
+        );
+      }
+      const name = parts[0];
+      const symbol = parts[1];
+      let pairChoice = storage.getRobinhoodPairToken();
+      let ethLp = String(storage.getRobinhoodLpEth());
+      let fee = storage.getRobinhoodBuyFee();
+      let imageUrl = '';
+      const validPairs = ['ETH', 'WETH', 'USDG'];
+      for (let i = 2; i < parts.length; i++) {
+        const item = parts[i];
+        if (item.startsWith('http://') || item.startsWith('https://') || item.startsWith('ipfs://')) {
+          imageUrl = item;
+        } else if (validPairs.includes(item.toUpperCase())) {
+          pairChoice = item.toUpperCase();
+        } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0.000001 && parseFloat(item) <= 0.002) {
+          ethLp = item;
+        } else if (!isNaN(parseFloat(item)) && parseFloat(item) >= 0 && parseFloat(item) <= 25) {
+          fee = Number(item);
+        }
+      }
+      await this.executeDeployRobinhood(ctx, {
+        name, symbol, imageUrl,
+        pair: pairChoice,
+        ethLiquidity: ethLp,
+        buyFee: fee, sellFee: fee
+      });
+    });
+
+    bot.command(['rhpair', 'robinhoodpair'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodPairMenu(ctx);
+      }
+      const choice = parts[0].toUpperCase();
+      const valid = ['ETH', 'WETH', 'USDG'];
+      if (!valid.includes(choice)) {
+        return ctx.replyWithHTML('⚠️ Pilihan pair tidak valid! Gunakan: <code>ETH</code>, <code>WETH</code>, atau <code>USDG</code>');
+      }
+      storage.setRobinhoodPairToken(choice);
+      await ctx.replyWithHTML(`✅ <b>Trading Pair Robinhood diatur ke: ${choice}!</b>`);
+    });
+
+    bot.command(['rhdex', 'robinhooddex'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodDexMenu(ctx);
+      }
+      const ver = parts[0].toLowerCase();
+      if (!['v4', 'v3'].includes(ver)) {
+        return ctx.replyWithHTML('⚠️ Pilihan DEX tidak valid! Gunakan <code>v4</code> atau <code>v3</code>');
+      }
+      storage.setRobinhoodDexVersion(ver);
+      await ctx.replyWithHTML(`✅ <b>DEX Engine Robinhood diatur ke: ${ver.toUpperCase()}!</b>`);
+    });
+
+    bot.command(['rhlp', 'robinhoodlp'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodLpMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0.000001 || val > 0.002) {
+        return ctx.replyWithHTML('⚠️ LP ETH harus antara <code>0.000001</code> dan <code>0.002</code>');
+      }
+      storage.setRobinhoodLpEth(val);
+      await ctx.replyWithHTML(`✅ <b>LP ETH Robinhood diatur ke: ${val} ETH!</b>`);
+    });
+
+    bot.command(['devbuyrh', 'rhdevbuy', 'robinhooddevbuy'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodLpMenu(ctx);
+      }
+      if (parts[0].toLowerCase() === 'off' || parts[0] === '0') {
+        storage.setRobinhoodDevBuyEth(0);
+        return ctx.replyWithHTML('✅ <b>Dev Buy Robinhood dinonaktifkan (0 ETH).</b>');
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0) {
+        return ctx.replyWithHTML('⚠️ Masukkan jumlah ETH yang valid (misal: <code>0.000001</code>) atau <code>off</code>.');
+      }
+      storage.setRobinhoodDevBuyEth(val);
+      await ctx.replyWithHTML(`✅ <b>Dev Buy Robinhood diatur ke: ${val} ETH!</b>`);
+    });
+
+    bot.command(['rhbuyfee', 'robinhoodbuyfee'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodFeeMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0 || val > 25) {
+        return ctx.replyWithHTML('⚠️ Fee beli harus antara 0 dan 25%');
+      }
+      storage.setRobinhoodBuyFee(val);
+      await ctx.replyWithHTML(`✅ <b>Fee Beli Robinhood diatur ke: ${val}%!</b>`);
+    });
+
+    bot.command(['rhsellfee', 'robinhoodsellfee'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodFeeMenu(ctx);
+      }
+      const val = parseFloat(parts[0]);
+      if (isNaN(val) || val < 0 || val > 25) {
+        return ctx.replyWithHTML('⚠️ Fee jual harus antara 0 dan 25%');
+      }
+      storage.setRobinhoodSellFee(val);
+      await ctx.replyWithHTML(`✅ <b>Fee Jual Robinhood diatur ke: ${val}%!</b>`);
+    });
+
+    bot.command(['rhfee', 'robinhoodfee'], async (ctx) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendRobinhoodFeeMenu(ctx);
+      }
+      const buy = parseFloat(parts[0]);
+      const sell = parts.length >= 2 ? parseFloat(parts[1]) : buy;
+      if (isNaN(buy) || buy < 0 || buy > 25 || isNaN(sell) || sell < 0 || sell > 25) {
+        return ctx.replyWithHTML('⚠️ Fee harus antara 0 dan 25%');
+      }
+      storage.setRobinhoodFees(buy, sell);
+      await ctx.replyWithHTML(`✅ <b>Fee Robinhood:</b> Beli <b>${buy}%</b> | Jual <b>${sell}%</b>`);
+    });
+
+    bot.command(['rhhistory', 'robinhoodhistory'], async (ctx) => {
+      await this.sendRobinhoodHistory(ctx);
+    });
+
     // Action Handlers
     bot.action('cmd_start_menu', async (ctx) => {
       await ctx.answerCbQuery();
@@ -1420,6 +1573,143 @@ export class TelegramBotApp {
       await this.sendBaseDirectHistory(ctx);
     });
 
+    // ===== ROBINHOOD CHAIN ACTION HANDLERS =====
+    bot.action('cmd_robinhood_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_deploy_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodDeployMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_history', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodHistory(ctx);
+    });
+
+    bot.action('cmd_robinhood_settings', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodSettingsMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_pair_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodPairMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_pair_([A-Za-z0-9_]+)$/, async (ctx) => {
+      const pair = ctx.match[1].toUpperCase();
+      storage.setRobinhoodPairToken(pair);
+      await ctx.answerCbQuery(`Trading Pair Robinhood diatur ke ${pair}!`).catch(() => {});
+      await this.sendRobinhoodPairMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_dex_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodDexMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_dex_([A-Za-z0-9_]+)$/, async (ctx) => {
+      const dex = ctx.match[1].toLowerCase();
+      storage.setRobinhoodDexVersion(dex);
+      await ctx.answerCbQuery(`DEX Robinhood diatur ke Uniswap ${dex.toUpperCase()}!`).catch(() => {});
+      await this.sendRobinhoodDexMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_v3tier_(\d+)$/, async (ctx) => {
+      const tier = Number(ctx.match[1]);
+      storage.setRobinhoodV3FeeTier(tier);
+      await ctx.answerCbQuery(`Fee Tier Pool diatur ke ${tier / 10000}%!`).catch(() => {});
+      await this.sendRobinhoodDexMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_lp_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodLpMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_lp_([0-9\.]+)$/, async (ctx) => {
+      const val = parseFloat(ctx.match[1]);
+      storage.setRobinhoodLpEth(val);
+      await ctx.answerCbQuery(`LP ETH Robinhood diatur ke ${val} ETH!`).catch(() => {});
+      await this.sendRobinhoodLpMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_devbuy_([0-9\.]+|off)$/, async (ctx) => {
+      const raw = ctx.match[1];
+      const val = raw === 'off' ? 0 : parseFloat(raw);
+      storage.setRobinhoodDevBuyEth(val);
+      await ctx.answerCbQuery(val > 0 ? `Dev Buy Robinhood diatur ke ${val} ETH!` : 'Dev Buy Robinhood dinonaktifkan!').catch(() => {});
+      await this.sendRobinhoodLpMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_fee_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendRobinhoodFeeMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_fees_([0-9\.]+)_([0-9\.]+)$/, async (ctx) => {
+      const b = parseFloat(ctx.match[1]);
+      const s = parseFloat(ctx.match[2]);
+      storage.setRobinhoodFees(b, s);
+      await ctx.answerCbQuery(`Fee Robinhood diatur: ${b}% Buy / ${s}% Sell!`).catch(() => {});
+      await this.sendRobinhoodFeeMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_buyfee_([0-9\.]+)$/, async (ctx) => {
+      const b = parseFloat(ctx.match[1]);
+      storage.setRobinhoodBuyFee(b);
+      await ctx.answerCbQuery(`Fee Beli Robinhood diatur ke ${b}%!`).catch(() => {});
+      await this.sendRobinhoodFeeMenu(ctx, true);
+    });
+
+    bot.action(/^set_rh_sellfee_([0-9\.]+)$/, async (ctx) => {
+      const s = parseFloat(ctx.match[1]);
+      storage.setRobinhoodSellFee(s);
+      await ctx.answerCbQuery(`Fee Jual Robinhood diatur ke ${s}%!`).catch(() => {});
+      await this.sendRobinhoodFeeMenu(ctx, true);
+    });
+
+    bot.action('cmd_robinhood_quick_demo', async (ctx) => {
+      await ctx.answerCbQuery('⏳ Memulai deploy demo ke Robinhood...').catch(() => {});
+      const randomTag = Math.floor(100 + Math.random() * 900);
+      await this.executeDeployRobinhood(ctx, {
+        name: `Robinhood Gem ${randomTag}`,
+        symbol: `RH${randomTag}`,
+        imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
+        pair: storage.getRobinhoodPairToken(),
+        ethLiquidity: String(storage.getRobinhoodLpEth()),
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee(),
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
+    bot.action(/^d_rh_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy ke Robinhood Chain...').catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      const targetToken = this.trendingCache ? this.trendingCache[idx] : null;
+      if (!targetToken) {
+        return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending robinhood lagi.');
+      }
+      await this.executeDeployRobinhood(ctx, {
+        name: targetToken.name,
+        symbol: targetToken.symbol,
+        imageUrl: targetToken.imageUrl,
+        pair: storage.getRobinhoodPairToken(),
+        ethLiquidity: String(storage.getRobinhoodLpEth()),
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee(),
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
     bot.action('cmd_base_direct_lp_menu', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       await this.sendBaseDirectLpMenu(ctx);
@@ -1622,6 +1912,7 @@ ${walletsOverview}
         Markup.button.callback('🪐 Elysium Hub & Deploy', 'cmd_elysium_menu')
       ],
       [
+        Markup.button.callback('🏹 Robinhood Hub & Deploy', 'cmd_robinhood_menu'),
         Markup.button.callback('🧠 AI Brain & Respan Gemini', 'cmd_ai_menu'),
         Markup.button.callback('🎨 Buat Token AI (/aitoken)', 'cmd_ai_generate_new')
       ],
@@ -3973,6 +4264,614 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
     if (this.harvestInterval) clearInterval(this.harvestInterval);
     vestingMonitor.stop();
     if (this.bot) this.bot.stop();
+  }
+
+  // ===== ROBINHOOD CHAIN METHODS =====
+
+  async sendRobinhoodMenu(ctx, isEdit = false) {
+    let info = { address: '', balanceEth: '0', balanceWeth: '0', balanceUsdg: '0', gasPriceGwei: '0', v4PoolManager: config.robinhoodV4PoolManager, v4PositionManager: config.robinhoodV4PositionManager, universalRouter: config.robinhoodUniversalRouter };
+    try { info = await robinhoodService.getDeployerInfo(); } catch (e) { /* ignore */ }
+    const deployedTokens = storage.getRobinhoodDeployedTokens();
+    const totalCount = deployedTokens.length;
+    const curLp = storage.getRobinhoodLpEth();
+    const curDevBuy = storage.getRobinhoodDevBuyEth();
+    const curPair = storage.getRobinhoodPairToken();
+    const curDex = storage.getRobinhoodDexVersion().toUpperCase();
+    const curBuyFee = storage.getRobinhoodBuyFee();
+    const curSellFee = storage.getRobinhoodSellFee();
+    const curV3Fee = storage.getRobinhoodV3FeeTier();
+    const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} ETH</b>` : '🔴 <i>Nonaktif (0 ETH)</i>';
+
+    const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
+    const balEthDisplay = info.balanceEth !== 'Error RPC' ? `<b>${parseFloat(info.balanceEth || 0).toFixed(6)} ETH</b>` : '⚠️ Gagal cek saldo';
+    const balWeth = parseFloat(info.balanceWeth || 0);
+    const balUsdg = parseFloat(info.balanceUsdg || 0);
+    const dexBadge = curDex === 'V4' ? '✨ <b>Uniswap V4 (Standar Utama &amp; Aktif)</b>' : '🦄 <b>Uniswap V3</b>';
+    const pairBadge = curPair === 'USDG' ? '💵 <b>TOKEN / USDG (Stablecoin)</b>' : (curPair === 'WETH' ? '📦 <b>TOKEN / WETH (Wrapped)</b>' : '💎 <b>TOKEN / ETH (Native Gas)</b>');
+
+    const msg =
+`🏹 <b>ROBINHOOD CHAIN LAUNCHPAD &amp; HUB (CHAIN ID 4663)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pusat deploy &amp; kelola token mandiri di <b>Robinhood Chain</b> (konfigurasi lengkap setara Elysium)!
+
+👛 <b>INFO DEPLOYER WALLET:</b>
+• Alamat: ${addrDisplay}
+• Saldo Gas (ETH): ${balEthDisplay}
+• Saldo WETH: <b>${balWeth.toFixed(6)} WETH</b>
+• Saldo USDG: <b>${balUsdg.toFixed(4)} USDG</b>
+• Estimasi Gas: <code>${info.gasPriceGwei} Gwei</code>
+• PoolManager V4: <code>${info.v4PoolManager || config.robinhoodV4PoolManager}</code>
+• Position Manager V4: <code>${info.v4PositionManager || config.robinhoodV4PositionManager}</code>
+• Universal Router: <code>${info.universalRouter || config.robinhoodUniversalRouter}</code>
+
+⚙️ <b>SETTING TRADING &amp; LIQUIDITY:</b>
+• DEX Engine: ${dexBadge}
+• Trading Pair: ${pairBadge}
+• Fee Tier Pool: <b>${curV3Fee / 10000}% (${curV3Fee} bps)</b>
+• Likuiditas Pool (LP): <b>${curLp} ETH / Quote</b>
+• Dev Buy Otomatis: ${devBuyText}
+• Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
+• Total Token Dideploy: <b>${totalCount} token</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Pilih menu pengaturan atau deploy di bawah:</i>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🚀 Deploy Token Baru ke Robinhood', 'cmd_robinhood_deploy_menu'),
+        Markup.button.callback('🔥 Trending Robinhood', 'cmd_trending_rh')
+      ],
+      [
+        Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_robinhood_pair_menu'),
+        Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_robinhood_dex_menu')
+      ],
+      [
+        Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_robinhood_fee_menu'),
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_robinhood_lp_menu')
+      ],
+      [
+        Markup.button.callback('🛠️ Semua Setting', 'cmd_robinhood_settings'),
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_robinhood_history')
+      ],
+      [
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_robinhood_menu'),
+        Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendRobinhoodPairMenu(ctx, isEdit = false) {
+    const curPair = storage.getRobinhoodPairToken();
+    const curDex = storage.getRobinhoodDexVersion().toUpperCase();
+    const check = (val) => curPair === val ? '✅ ' : '';
+
+    const msg =
+`🔄 <b>PENGATURAN TRADING PAIR ROBINHOOD (${curDex})</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pilih quote token pasangan likuiditas yang akan digunakan saat deploy token di Robinhood Chain:
+
+💎 <b>ETH (Native Gas - Default):</b> Pasangan native coin gas ETH di Robinhood Chain. Di Uniswap V4 disetor langsung sebagai native gas (address 0) tanpa wrap!
+📦 <b>WETH (Wrapped ETH):</b> Pasangan Wrapped ETH (<code>${config.robinhoodWeth}</code>). Otomatis wrap ETH ke WETH sebelum masuk pool.
+💵 <b>USDG (Stablecoin):</b> Pasangan stablecoin USDG di Robinhood Chain (<code>${config.robinhoodUsdg}</code>). Pastikan wallet memiliki saldo USDG.
+
+🎯 <b>Setting Pair Aktif:</b> <b>${curPair}</b>
+
+<i>Pilih pair di bawah atau gunakan:</i> <code>/rhpair [eth|weth|usdg]</code>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${check('ETH')}💎 ETH (Native - Default)`, 'set_rh_pair_ETH'),
+        Markup.button.callback(`${check('WETH')}📦 WETH (Wrapped ETH)`, 'set_rh_pair_WETH')
+      ],
+      [
+        Markup.button.callback(`${check('USDG')}💵 USDG (Stablecoin)`, 'set_rh_pair_USDG'),
+        Markup.button.callback('🦄 Atur DEX Engine', 'cmd_robinhood_dex_menu')
+      ],
+      [
+        Markup.button.callback('🏹 Kembali ke Menu Robinhood', 'cmd_robinhood_menu'),
+        Markup.button.callback('⬅️ Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendRobinhoodDexMenu(ctx, isEdit = false) {
+    const curDex = storage.getRobinhoodDexVersion();
+    const curTier = storage.getRobinhoodV3FeeTier();
+    const check = (val) => curDex === val ? '✅ ' : '';
+    const checkTier = (val) => Number(curTier) === Number(val) ? '✅ ' : '';
+
+    const msg =
+`🦄 <b>PENGATURAN DEX ENGINE ROBINHOOD CHAIN</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pilih versi protokol DEX &amp; Fee Tier pool untuk membuat likuiditas &amp; dev buy:
+
+✨ <b>Uniswap V4 (Default &amp; Standar Utama):</b>
+• Singleton PoolManager &amp; Position NFT
+• Dukungan Native Gas ETH langsung (address 0)
+• UniversalRouter eksekusi Dev Buy V4 berkecepatan tinggi
+
+🦄 <b>Uniswap V3:</b>
+• NonfungiblePositionManager NFT
+• Full-Range Liquidity pada Factory V3
+
+🎯 <b>DEX Aktif:</b> <b>Uniswap ${curDex.toUpperCase()}</b> | <b>Fee Tier:</b> <b>${curTier / 10000}% (${curTier} bps)</b>
+
+<i>Pilih DEX &amp; Fee Tier di bawah atau ketik:</i> <code>/rhdex [v4|v3]</code>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${check('v4')}✨ Uniswap V4 (Default)`, 'set_rh_dex_v4'),
+        Markup.button.callback(`${check('v3')}🦄 Uniswap V3`, 'set_rh_dex_v3')
+      ],
+      [
+        Markup.button.callback('── 📊 Fee Tier Pool (LP Swap Fee) ──', 'dummy_rh_tier')
+      ],
+      [
+        Markup.button.callback(`${checkTier(100)}0.01%`, 'set_rh_v3tier_100'),
+        Markup.button.callback(`${checkTier(500)}0.05%`, 'set_rh_v3tier_500'),
+        Markup.button.callback(`${checkTier(3000)}0.3%`, 'set_rh_v3tier_3000'),
+        Markup.button.callback(`${checkTier(10000)}1% (Meme)`, 'set_rh_v3tier_10000')
+      ],
+      [
+        Markup.button.callback('🔄 Atur Trading Pair', 'cmd_robinhood_pair_menu'),
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_robinhood_lp_menu')
+      ],
+      [
+        Markup.button.callback('🏹 Kembali ke Menu Robinhood', 'cmd_robinhood_menu'),
+        Markup.button.callback('⬅️ Dashboard Utama', 'cmd_start_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendRobinhoodLpMenu(ctx, isEdit = false) {
+    const curLp = storage.getRobinhoodLpEth();
+    const curDevBuy = storage.getRobinhoodDevBuyEth();
+    const curPair = storage.getRobinhoodPairToken();
+    const curDex = storage.getRobinhoodDexVersion().toUpperCase();
+    const devBuyLabel = curDevBuy > 0 ? `🟢 ${curDevBuy} ETH` : '🔴 Nonaktif (0 ETH)';
+
+    const msg =
+`⚙️ <b>PENGATURAN LIKUIDITAS (LP) &amp; DEV BUY ROBINHOOD</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Atur jumlah <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex} (Pair: ${curPair}) dan nominal Dev Buy otomatis saat peluncuran token:
+
+💧 <b>Setting LP Saat Ini:</b> <code>${curLp} ETH</code>
+🛒 <b>Setting Dev Buy Saat Ini:</b> <code>${devBuyLabel}</code>
+💡 <b>Rentang LP yang Diizinkan:</b> <code>0.000001</code> s/d <code>0.002 ETH</code>
+
+<i>Pilih preset cepat di bawah atau ketik perintah chat:</i>
+• <code>/rhlp 0.00001</code> s/d <code>/rhlp 0.002</code>
+• <code>/devbuyrh 0.000001</code> (atau <code>/devbuyrh off</code>)`;
+
+    const checkLp = (val) => Number(curLp) === Number(val) ? '✅ ' : '';
+    const checkDevBuy = (val) => Number(curDevBuy) === Number(val) ? '✅ ' : '';
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${checkLp(0.00001)}0.00001 ETH (Default)`, 'set_rh_lp_0.00001'),
+        Markup.button.callback(`${checkLp(0.00005)}0.00005 ETH`, 'set_rh_lp_0.00005')
+      ],
+      [
+        Markup.button.callback(`${checkLp(0.0001)}0.0001 ETH`, 'set_rh_lp_0.0001'),
+        Markup.button.callback(`${checkLp(0.0005)}0.0005 ETH`, 'set_rh_lp_0.0005')
+      ],
+      [
+        Markup.button.callback(`${checkLp(0.001)}0.001 ETH`, 'set_rh_lp_0.001'),
+        Markup.button.callback(`${checkLp(0.002)}0.002 ETH (Max)`, 'set_rh_lp_0.002')
+      ],
+      [
+        Markup.button.callback('── 🛒 Atur Dev Buy Otomatis ──', 'dummy_rh_devbuy')
+      ],
+      [
+        Markup.button.callback(`${checkDevBuy(0.000001)}0.000001 ETH`, 'set_rh_devbuy_0.000001'),
+        Markup.button.callback(`${checkDevBuy(0.00001)}0.00001 ETH`, 'set_rh_devbuy_0.00001'),
+        Markup.button.callback(`${checkDevBuy(0.0001)}0.0001 ETH`, 'set_rh_devbuy_0.0001'),
+        Markup.button.callback(`${curDevBuy === 0 ? '✅ ' : ''}❌ OFF`, 'set_rh_devbuy_off')
+      ],
+      [
+        Markup.button.callback('🔄 Ubah Trading Pair', 'cmd_robinhood_pair_menu'),
+        Markup.button.callback('🏹 Menu Robinhood', 'cmd_robinhood_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendRobinhoodFeeMenu(ctx, isEdit = false) {
+    const curBuyFee = storage.getRobinhoodBuyFee();
+    const curSellFee = storage.getRobinhoodSellFee();
+
+    const msg =
+`🏷️ <b>PENGATURAN FEE JUAL &amp; BELI (ROBINHOOD CHAIN)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pengaturan fee ini <b>khusus berlaku untuk jaringan Robinhood Chain</b> (Chain ID 4663).
+
+💰 <b>Mekanisme Fee &amp; Proteksi Sniper:</b>
+• Fee dipotong otomatis on-chain saat swap beli maupun jual dan dikirim ke Fee Wallet (deployer).
+• <b>Anti-Sniper Protection:</b> Saat 30 menit pertama peluncuran, sniper buy tax <b>80%</b> aktif untuk menahan bot sniper. Setelah periode sniper selesai, pajak beli otomatis mengikuti <b>Fee Beli (${curBuyFee}%)</b> ini.
+
+📊 <b>Konfigurasi Fee Saat Ini:</b>
+• 🟢 <b>Fee Beli (Buy Fee):</b> <b>${curBuyFee}%</b>
+• 🔴 <b>Fee Jual (Sell Fee):</b> <b>${curSellFee}%</b>
+
+👇 <i>Pilih preset kombinasi atau klik persentase individual di bawah:</i>
+
+💬 <b>Perintah Chat Langsung:</b>
+• <code>/rhfee &lt;buy%&gt; &lt;sell%&gt;</code> (Contoh: <code>/rhfee 3 5</code>)
+• <code>/rhbuyfee &lt;%&gt;</code> | <code>/rhsellfee &lt;%&gt;</code>`;
+
+    const isPreset = (b, s) => (Number(curBuyFee) === b && Number(curSellFee) === s) ? '✅ ' : '';
+    const isBuy = (b) => Number(curBuyFee) === b ? '✅ ' : '';
+    const isSell = (s) => Number(curSellFee) === s ? '✅ ' : '';
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${isPreset(0, 0)}0% / 0% (Bebas Fee)`, 'set_rh_fees_0_0'),
+        Markup.button.callback(`${isPreset(1, 1)}1% / 1% (Rendah)`, 'set_rh_fees_1_1')
+      ],
+      [
+        Markup.button.callback(`${isPreset(3, 3)}3% / 3% (Standar)`, 'set_rh_fees_3_3'),
+        Markup.button.callback(`${isPreset(5, 5)}5% / 5% (Default)`, 'set_rh_fees_5_5')
+      ],
+      [
+        Markup.button.callback(`${isPreset(3, 5)}3% Buy / 5% Sell`, 'set_rh_fees_3_5'),
+        Markup.button.callback(`${isPreset(5, 10)}5% Buy / 10% Sell`, 'set_rh_fees_5_10')
+      ],
+      [
+        Markup.button.callback('── 🟢 Atur Fee Beli (Buy Fee) ──', 'dummy_rh_buy')
+      ],
+      [
+        Markup.button.callback(`${isBuy(0)}0%`, 'set_rh_buyfee_0'),
+        Markup.button.callback(`${isBuy(1)}1%`, 'set_rh_buyfee_1'),
+        Markup.button.callback(`${isBuy(2)}2%`, 'set_rh_buyfee_2'),
+        Markup.button.callback(`${isBuy(3)}3%`, 'set_rh_buyfee_3'),
+        Markup.button.callback(`${isBuy(5)}5%`, 'set_rh_buyfee_5'),
+        Markup.button.callback(`${isBuy(10)}10%`, 'set_rh_buyfee_10')
+      ],
+      [
+        Markup.button.callback('── 🔴 Atur Fee Jual (Sell Fee) ──', 'dummy_rh_sell')
+      ],
+      [
+        Markup.button.callback(`${isSell(0)}0%`, 'set_rh_sellfee_0'),
+        Markup.button.callback(`${isSell(1)}1%`, 'set_rh_sellfee_1'),
+        Markup.button.callback(`${isSell(2)}2%`, 'set_rh_sellfee_2'),
+        Markup.button.callback(`${isSell(3)}3%`, 'set_rh_sellfee_3'),
+        Markup.button.callback(`${isSell(5)}5%`, 'set_rh_sellfee_5'),
+        Markup.button.callback(`${isSell(10)}10%`, 'set_rh_sellfee_10')
+      ],
+      [
+        Markup.button.callback('🚀 Ke Panel Deploy', 'cmd_robinhood_deploy_menu'),
+        Markup.button.callback('🏹 Menu Robinhood', 'cmd_robinhood_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendRobinhoodDeployMenu(ctx, isEdit = false) {
+    const curLp = storage.getRobinhoodLpEth();
+    const curDevBuy = storage.getRobinhoodDevBuyEth();
+    const curPair = storage.getRobinhoodPairToken();
+    const curDex = storage.getRobinhoodDexVersion().toUpperCase();
+    const curBuyFee = storage.getRobinhoodBuyFee();
+    const curSellFee = storage.getRobinhoodSellFee();
+
+    const msg =
+`🚀 <b>DEPLOY TOKEN KE ROBINHOOD CHAIN (ID: 4663)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Gunakan perintah berikut untuk deploy token ERC-20 mandiri ke Robinhood Chain (Gas ETH):
+
+<b>Format perintah:</b>
+<code>/deployrobinhood [NamaToken] [TICKER] [Pair] [LpETH] [Fee%] [ImageUrl]</code>
+
+<b>Contoh siap pakai (sesuai setting aktif):</b>
+<code>/deployrobinhood MoonToken MOON ${curPair} ${curLp} ${curBuyFee}</code>
+
+⚙️ <b>Setting Aktif:</b>
+• DEX Engine: <b>Uniswap ${curDex}</b>
+• Trading Pair: <b>TOKEN / ${curPair}</b>
+• LP Awal: <b>${curLp} ETH</b> + <b>20B Token</b>
+• Dev Buy: <b>${curDevBuy > 0 ? curDevBuy + ' ETH' : 'Nonaktif'}</b>
+• Fee: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Anti-Sniper: <b>80% Buy Tax (30 Menit)</b>
+• Team Lock: <b>6B Token (3 Jam)</b>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🎯 Quick Demo Deploy', 'cmd_robinhood_quick_demo'),
+        Markup.button.callback('⚙️ Ubah Setting', 'cmd_robinhood_settings')
+      ],
+      [
+        Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_robinhood_pair_menu'),
+        Markup.button.callback(`🏷️ Fee: ${curBuyFee}%/${curSellFee}%`, 'cmd_robinhood_fee_menu')
+      ],
+      [
+        Markup.button.callback('💧 Atur LP & Dev Buy', 'cmd_robinhood_lp_menu'),
+        Markup.button.callback('🏹 Kembali ke Menu Robinhood', 'cmd_robinhood_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async sendRobinhoodSettingsMenu(ctx, isEdit = false) {
+    const curLp = storage.getRobinhoodLpEth();
+    const curDevBuy = storage.getRobinhoodDevBuyEth();
+    const curPair = storage.getRobinhoodPairToken();
+    const curDex = storage.getRobinhoodDexVersion().toUpperCase();
+    const curBuyFee = storage.getRobinhoodBuyFee();
+    const curSellFee = storage.getRobinhoodSellFee();
+    const curV3Fee = storage.getRobinhoodV3FeeTier();
+
+    const msg =
+`⚙️ <b>PUSAT SETTING ROBINHOOD CHAIN DEPLOY</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif di bawah atau via perintah chat:
+
+🔧 <b>PARAMETER AKTIF SAAT INI:</b>
+• DEX Engine: <b>Uniswap ${curDex}</b>
+• Trading Pair: <b>${curPair}</b>
+• Fee Tier Pool: <b>${curV3Fee / 10000}% (${curV3Fee} bps)</b>
+• Likuiditas Pool (LP): <b>${curLp} ETH</b>
+• Dev Buy Otomatis: <b>${curDevBuy > 0 ? curDevBuy + ' ETH' : 'Nonaktif'}</b>
+• Fee Beli / Jual: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Anti-Sniper: <b>80% Buy Tax (30 Menit)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 <b>PERINTAH CHAT CEPAT:</b>
+• <code>/rhpair [eth|weth|usdg]</code> • <code>/rhdex [v4|v3]</code>
+• <code>/rhlp [0.000001-0.002]</code> • <code>/devbuyrh [jumlah|off]</code>
+• <code>/rhfee [buy] [sell]</code> • <code>/rhbuyfee [0-25]</code> • <code>/rhsellfee [0-25]</code>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_robinhood_pair_menu'),
+        Markup.button.callback(`🦄 DEX: Uniswap ${curDex}`, 'cmd_robinhood_dex_menu')
+      ],
+      [
+        Markup.button.callback(`💧 LP & Dev Buy (${curLp} ETH)`, 'cmd_robinhood_lp_menu'),
+        Markup.button.callback(`🏷️ Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_robinhood_fee_menu')
+      ],
+      [
+        Markup.button.callback('🚀 Panel Deploy Token', 'cmd_robinhood_deploy_menu'),
+        Markup.button.callback('🏹 Menu Robinhood', 'cmd_robinhood_menu')
+      ]
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
+  }
+
+  async executeDeployRobinhood(ctx, options = {}) {
+    const name = (options.name || '').trim();
+    const symbol = (options.symbol || '').trim().toUpperCase();
+    if (!name || !symbol) {
+      return ctx.replyWithHTML('⚠️ <b>Nama dan ticker token wajib diisi!</b>\nContoh: <code>/deployrobinhood MoonToken MOON</code>');
+    }
+
+    const ethLp = String(options.ethLiquidity || storage.getRobinhoodLpEth() || '0.00001');
+    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : storage.getRobinhoodDevBuyEth());
+    const pairChoice = (options.pair || storage.getRobinhoodPairToken() || 'ETH').toUpperCase();
+    const dexVersion = (options.dexVersion || storage.getRobinhoodDexVersion() || 'v4').toLowerCase();
+    const dexName = dexVersion === 'v4' ? 'Uniswap V4' : 'Uniswap V3';
+    const curBuyFee = Number(options.buyFee !== undefined ? options.buyFee : storage.getRobinhoodBuyFee());
+    const curSellFee = Number(options.sellFee !== undefined ? options.sellFee : storage.getRobinhoodSellFee());
+    const feeTier = Number(options.feeTier || storage.getRobinhoodV3FeeTier() || 10000);
+
+    const initialMsg = await ctx.replyWithHTML(
+      `🏹 <b>MEMULAI DEPLOYMENT KE ROBINHOOD CHAIN (ID 4663)</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Token: <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)\n` +
+      `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
+      `• DEX Engine: <b>${dexName}</b>\n` +
+      `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
+      `• Likuiditas Pool: <b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(symbol)}</b>\n` +
+      `• Dev Buy Otomatis: <b>${Number(devBuyEth) > 0 ? `${devBuyEth} ETH` : 'Nonaktif'}</b>\n` +
+      `• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>\n` +
+      `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
+      `⏳ <i>Langkah 1/8: Memeriksa saldo ETH, quote token, &amp; parameter on-chain...</i>`
+    );
+
+    const progressUpdates = async (step, msg) => {
+      try {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          initialMsg.message_id,
+          null,
+          `🏹 <b>DEPLOYMENT KE ROBINHOOD CHAIN (ID 4663)</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• Token: <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)\n` +
+          `• DEX &amp; Pair: <b>${dexName}</b> (Pair: <code>${pairChoice}</code>)\n` +
+          `• Status: <b>Langkah ${step}/8</b>\n\n` +
+          `⏳ <i>${escapeHtml(msg)}</i>`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+    };
+
+    try {
+      const deployOptions = {
+        ...options,
+        name,
+        symbol,
+        imageUrl: options.imageUrl || '',
+        pair: pairChoice,
+        dexVersion,
+        feeTier,
+        ethLiquidity: ethLp,
+        devBuyEth,
+        buyFee: curBuyFee,
+        sellFee: curSellFee,
+        totalSupply: options.totalSupply || config.robinhoodDefaultTotalSupply
+      };
+
+      const result = await robinhoodService.deployToken(deployOptions, progressUpdates);
+
+      const summaryMsg =
+`🎉 <b>TOKEN BERHASIL DIDEPLOY &amp; LIVE DI ROBINHOOD CHAIN!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Info Token:</b>
+• Nama: <b>${escapeHtml(result.token.name)}</b>
+• Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
+• Kontrak Token: <code>${result.token.address}</code>
+• Logo IPFS/URL: <a href="${toHttpImageUrl(result.token?.imageUrl || options.imageUrl)}">Lihat Gambar Logo</a>
+• Total Supply: <b>${Number(result.token.totalSupply || 100000000000).toLocaleString()}</b>
+
+💧 <b>${result.dexVersion} Pool &amp; Likuiditas:</b>
+• Trading Pair: <b>TOKEN / ${result.pairToken}</b>
+• Alamat Pool (Pair): <code>${result.liquidity.poolAddress}</code>
+${result.positionTokenId ? `• Position NFT: <b>${result.dexVersion} Position #${result.positionTokenId}</b>\n` : ''}• Likuiditas Awal: <b>${result.liquidity.quoteDeposited}</b> + <b>${result.liquidity.tokensDeposited}</b>
+• Dev Buy Otomatis: <b>${result.liquidity.devBuyEth}</b>
+• Harga Awal: <code>${result.liquidity.initialPrice} ${result.pairToken}</code>
+• Trading: <b>🟢 AKTIF (Bisa dibeli &amp; dijual langsung!)</b>
+
+🛡️ <b>Proteksi &amp; Pajak:</b>
+• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Sniper Protection: <b>80% Buy Tax (30 Menit Pertama)</b>
+${result.lock?.address ? `• Timelock: <code>${result.lock.address}</code> (${result.lock.amount} Token)\n` : ''}
+🔗 <b>Transaction Hashes:</b>
+• Deploy Token: <a href="${result.urls.tokenExplorer}">${result.token.deployTxHash.slice(0, 14)}...</a>
+• Add Liquidity: <code>${result.liquidity.addLiquidityTxHash.slice(0, 14)}...</code>
+• Enable Trading: <code>${result.liquidity.enableTradingTxHash.slice(0, 14)}...</code>
+${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devBuyTxHash.slice(0, 14)}...</code>\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Klik tautan di bawah untuk melihat di Blockscout Explorer &amp; DEX:</i>`;
+
+      const buttons = [
+        [
+          Markup.button.url('🔍 Lihat di Blockscout', result.urls.tokenExplorer),
+          Markup.button.url('📊 DexScreener', result.urls.dexscreener)
+        ],
+        [
+          Markup.button.url('💧 Lihat Pool di Explorer', result.urls.poolExplorer)
+        ],
+        [
+          Markup.button.callback('🏹 Dashboard Robinhood', 'cmd_robinhood_menu'),
+          Markup.button.callback('⬅️ Menu Utama', 'cmd_start_menu')
+        ]
+      ];
+
+      const rawLogo = result.token?.imageUrl || options.imageUrl;
+      const photoUrl = toHttpImageUrl(rawLogo);
+
+      if (photoUrl && photoUrl.startsWith('http')) {
+        try {
+          await ctx.replyWithPhoto(photoUrl, {
+            caption: summaryMsg,
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard(buttons)
+          });
+        } catch (photoErr) {
+          console.warn('[RobinhoodBot] replyWithPhoto failed, fallback to replyWithHTML:', photoErr.message);
+          await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+        }
+      } else {
+        await ctx.replyWithHTML(summaryMsg, Markup.inlineKeyboard(buttons));
+      }
+    } catch (err) {
+      console.error('[executeDeployRobinhood] error:', err);
+      await ctx.replyWithHTML(
+        `❌ <b>Deployment ke Robinhood Chain Gagal!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• Error: <code>${escapeHtml(err.message)}</code>\n\n` +
+        `💡 <i>Pastikan saldo ETH di wallet deployer mencukupi untuk LP + Dev Buy + gas, lalu coba lagi.</i>`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Coba Lagi', 'cmd_robinhood_deploy_menu')],
+          [Markup.button.callback('🏹 Dashboard Robinhood', 'cmd_robinhood_menu')]
+        ])
+      );
+    }
+  }
+
+  async sendRobinhoodHistory(ctx) {
+    const tokens = storage.getRobinhoodDeployedTokens();
+    if (!tokens || tokens.length === 0) {
+      const msg = '📭 <b>Belum ada token yang dideploy di Robinhood Chain.</b>\n\nGunakan <code>/deployrobinhood Nama TICKER</code> untuk mulai deploy token pertama Anda!';
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 Deploy Sekarang', 'cmd_robinhood_deploy_menu')],
+        [Markup.button.callback('🏹 Menu Robinhood', 'cmd_robinhood_menu')]
+      ]);
+      try {
+        if (ctx.callbackQuery) {
+          await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: keyboard.reply_markup });
+        } else {
+          await ctx.replyWithHTML(msg, keyboard);
+        }
+      } catch { await ctx.replyWithHTML(msg, keyboard); }
+      return;
+    }
+
+    const explorerBase = config.robinhoodExplorer || 'https://robinhoodchain.blockscout.com';
+    const recent = tokens.slice(0, 5);
+    let msg = `📜 <b>RIWAYAT DEPLOY ROBINHOOD CHAIN (${tokens.length} token)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    for (let i = 0; i < recent.length; i++) {
+      const t = recent[i];
+      const date = t.deployedAt ? new Date(t.deployedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '-';
+      const shortAddr = t.tokenAddress ? `${t.tokenAddress.slice(0, 8)}...${t.tokenAddress.slice(-6)}` : '-';
+      const pair = t.pairToken || t.pair || '-';
+      const lpEth = t.ethDeposited || t.ethLiquidity || '-';
+      const buyF = t.buyFee ?? t.buyFeePercent ?? '-';
+      const sellF = t.sellFee ?? t.sellFeePercent ?? '-';
+      msg +=
+        `\n<b>${i + 1}. ${escapeHtml(t.name)} ($${escapeHtml(t.symbol)})</b>\n` +
+        `• Alamat: <a href="${explorerBase}/address/${t.tokenAddress}"><code>${shortAddr}</code></a>\n` +
+        `• Pair: ${pair} | DEX: ${String(t.dexVersion || '-').toUpperCase()}\n` +
+        `• LP: ${lpEth} ETH | Fee: ${buyF}%B / ${sellF}%S\n` +
+        `• Deploy: ${date}\n`;
+    }
+
+    if (tokens.length > 5) msg += `\n<i>... dan ${tokens.length - 5} token lainnya.</i>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('🚀 Deploy Token Baru', 'cmd_robinhood_deploy_menu')],
+      [Markup.button.callback('🏹 Menu Robinhood', 'cmd_robinhood_menu')]
+    ]);
+    try {
+      if (ctx.callbackQuery) {
+        await ctx.editMessageText(msg, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: keyboard.reply_markup });
+      } else {
+        await ctx.replyWithHTML(msg, { disable_web_page_preview: true, ...keyboard });
+      }
+    } catch { await ctx.replyWithHTML(msg, { disable_web_page_preview: true, ...keyboard }); }
   }
 }
 

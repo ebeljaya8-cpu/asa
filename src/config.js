@@ -80,6 +80,7 @@ export const config = {
   dataFile: path.join(__dirname, '..', 'data', 'deployed_tokens.json'),
   dataFileElysium: path.join(__dirname, '..', 'data', 'elysium_deployed_tokens.json'),
   dataFileBaseDirect: path.join(__dirname, '..', 'data', 'base_direct_deployed_tokens.json'),
+  dataFileRobinhood: path.join(__dirname, '..', 'data', 'robinhood_deployed_tokens.json'),
   stateFile: path.join(__dirname, '..', 'data', 'bot_state.json'),
 
   // Base Direct Deploy (Tanpa Clanker) Settings
@@ -128,6 +129,27 @@ export const config = {
   elysiumDefaultLpHype: parseFloat(process.env.ELYSIUM_DEFAULT_LP_HYPE || '0.0001'),
   elysiumDevBuyHype: parseFloat(process.env.ELYSIUM_DEV_BUY_HYPE || '0.0001'),
   elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
+
+  // Robinhood Chain Settings (Chain ID: 4663, Gas: ETH)
+  robinhoodRpcUrl: process.env.ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com',
+  robinhoodChainId: parseInt(process.env.ROBINHOOD_CHAIN_ID || '4663', 10),
+  robinhoodExplorer: process.env.ROBINHOOD_EXPLORER || 'https://robinhoodchain.blockscout.com',
+  robinhoodPrivateKey: process.env.ROBINHOOD_PRIVATE_KEY || process.env.ELYSIUM_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.PRIVATE_KEY_1 || process.env.PRIVATE_KEY || '',
+  robinhoodV4PoolManager: process.env.ROBINHOOD_V4_POOL_MANAGER || '0x8366a39cc670b4001a1121b8f6a443a643e40951',
+  robinhoodV4PositionManager: process.env.ROBINHOOD_V4_POSITION_MANAGER || '0x58daec3116aae6d93017baaea7749052e8a04fa7',
+  robinhoodUniversalRouter: process.env.ROBINHOOD_UNIVERSAL_ROUTER || '0x204FAca1764B154221e35c0d20aBb3c525710498',
+  robinhoodPermit2: process.env.ROBINHOOD_PERMIT2 || '0x000000000022D473030F116dDEE9F6B43aC78BA3',
+  robinhoodV3Factory: process.env.ROBINHOOD_V3_FACTORY || '0x1f7d7550b1b028f7571e69a784071f0205fd2efa',
+  robinhoodV3PositionManager: process.env.ROBINHOOD_V3_POSITION_MANAGER || '0x73991a25c818bf1f1128deaab1492d45638de0d3',
+  robinhoodWeth: process.env.ROBINHOOD_WETH || '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',
+  robinhoodUsdg: process.env.ROBINHOOD_USDG || '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',
+  robinhoodDefaultDex: process.env.ROBINHOOD_DEFAULT_DEX || 'v4',
+  robinhoodDefaultPair: process.env.ROBINHOOD_DEFAULT_PAIR || 'ETH',
+  robinhoodDefaultLpEth: parseFloat(process.env.ROBINHOOD_DEFAULT_LP_ETH || '0.00001'),
+  robinhoodDevBuyEth: parseFloat(process.env.ROBINHOOD_DEV_BUY_ETH || '0.000001'),
+  robinhoodDefaultTotalSupply: process.env.ROBINHOOD_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
+  robinhoodDefaultBuyFee: parseFloat(process.env.ROBINHOOD_DEFAULT_BUY_FEE || '5'),
+  robinhoodDefaultSellFee: parseFloat(process.env.ROBINHOOD_DEFAULT_SELL_FEE || '5'),
 
   // Respan AI Gateway (Gemini 4 Carbon Free)
   respanApiKey: process.env.RESPAN_API_KEY || '',

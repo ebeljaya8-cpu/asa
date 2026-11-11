@@ -7,6 +7,7 @@ export class Storage {
     this.dataFile = config.dataFile;
     this.dataFileElysium = config.dataFileElysium;
     this.dataFileBaseDirect = config.dataFileBaseDirect;
+    this.dataFileRobinhood = config.dataFileRobinhood;
     this.stateFile = config.stateFile;
     this.init();
   }
@@ -27,6 +28,10 @@ export class Storage {
 
     if (!fs.existsSync(this.dataFileBaseDirect)) {
       fs.writeFileSync(this.dataFileBaseDirect, JSON.stringify([], null, 2));
+    }
+
+    if (!fs.existsSync(this.dataFileRobinhood)) {
+      fs.writeFileSync(this.dataFileRobinhood, JSON.stringify([], null, 2));
     }
 
     if (!fs.existsSync(this.stateFile)) {
@@ -672,6 +677,151 @@ export class Storage {
     state.baseDirectV3FeeTier = target;
     this.saveState(state);
     return target;
+  }
+
+  // ===== ROBINHOOD CHAIN SETTINGS (Chain ID: 4663, Gas: ETH) =====
+
+  getRobinhoodDeployedTokens() {
+    try {
+      if (!fs.existsSync(this.dataFileRobinhood)) return [];
+      const data = fs.readFileSync(this.dataFileRobinhood, 'utf-8');
+      return JSON.parse(data) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveRobinhoodDeployedToken(record) {
+    const tokens = this.getRobinhoodDeployedTokens();
+    const entry = {
+      ...record,
+      network: 'Robinhood Chain',
+      chainId: 4663,
+      deployedAt: record.deployedAt || new Date().toISOString(),
+    };
+    tokens.unshift(entry);
+    fs.writeFileSync(this.dataFileRobinhood, JSON.stringify(tokens.slice(0, 500), null, 2));
+    return entry;
+  }
+
+  getRobinhoodLpEth() {
+    const state = this.getState();
+    return state.robinhoodLpEth ?? (config.robinhoodDefaultLpEth || 0.00001);
+  }
+
+  setRobinhoodLpEth(amount) {
+    const val = parseFloat(amount);
+    if (isNaN(val) || val < 0.000001 || val > 0.002) {
+      throw new Error('LP ETH harus antara 0.000001 dan 0.002');
+    }
+    const state = this.getState();
+    state.robinhoodLpEth = val;
+    this.saveState(state);
+    return val;
+  }
+
+  getRobinhoodDevBuyEth() {
+    const state = this.getState();
+    return state.robinhoodDevBuyEth ?? (config.robinhoodDevBuyEth ?? 0.000001);
+  }
+
+  setRobinhoodDevBuyEth(amount) {
+    const val = parseFloat(amount);
+    if (isNaN(val) || val < 0) {
+      throw new Error('Dev Buy ETH tidak boleh negatif');
+    }
+    const state = this.getState();
+    state.robinhoodDevBuyEth = val;
+    this.saveState(state);
+    return val;
+  }
+
+  getRobinhoodDexVersion() {
+    const state = this.getState();
+    return state.robinhoodDexVersion || config.robinhoodDefaultDex || 'v4';
+  }
+
+  setRobinhoodDexVersion(version) {
+    const raw = (version || 'v4').toLowerCase().trim();
+    const valid = ['v4', 'v3'];
+    const target = valid.includes(raw) ? raw : 'v4';
+    const state = this.getState();
+    state.robinhoodDexVersion = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getRobinhoodPairToken() {
+    const state = this.getState();
+    return state.robinhoodPairToken || config.robinhoodDefaultPair || 'ETH';
+  }
+
+  setRobinhoodPairToken(token) {
+    const upper = (token || 'ETH').toUpperCase().trim();
+    const valid = ['ETH', 'WETH', 'USDG'];
+    const target = valid.includes(upper) ? upper : 'ETH';
+    const state = this.getState();
+    state.robinhoodPairToken = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getRobinhoodV3FeeTier() {
+    const state = this.getState();
+    return state.robinhoodV3FeeTier || 10000;
+  }
+
+  setRobinhoodV3FeeTier(fee) {
+    const valid = [100, 500, 3000, 10000];
+    const target = valid.includes(Number(fee)) ? Number(fee) : 10000;
+    const state = this.getState();
+    state.robinhoodV3FeeTier = target;
+    this.saveState(state);
+    return target;
+  }
+
+  getRobinhoodBuyFee() {
+    const state = this.getState();
+    return state.robinhoodBuyFee ?? (config.robinhoodDefaultBuyFee ?? 5);
+  }
+
+  setRobinhoodBuyFee(fee) {
+    const val = parseFloat(fee);
+    if (isNaN(val) || val < 0 || val > 25) {
+      throw new Error('Buy fee harus antara 0 dan 25');
+    }
+    const state = this.getState();
+    state.robinhoodBuyFee = val;
+    this.saveState(state);
+    return val;
+  }
+
+  getRobinhoodSellFee() {
+    const state = this.getState();
+    return state.robinhoodSellFee ?? (config.robinhoodDefaultSellFee ?? 5);
+  }
+
+  setRobinhoodSellFee(fee) {
+    const val = parseFloat(fee);
+    if (isNaN(val) || val < 0 || val > 25) {
+      throw new Error('Sell fee harus antara 0 dan 25');
+    }
+    const state = this.getState();
+    state.robinhoodSellFee = val;
+    this.saveState(state);
+    return val;
+  }
+
+  setRobinhoodFees(buyFee, sellFee) {
+    const buy = parseFloat(buyFee);
+    const sell = parseFloat(sellFee);
+    if (isNaN(buy) || buy < 0 || buy > 25) throw new Error('Buy fee harus antara 0 dan 25');
+    if (isNaN(sell) || sell < 0 || sell > 25) throw new Error('Sell fee harus antara 0 dan 25');
+    const state = this.getState();
+    state.robinhoodBuyFee = buy;
+    state.robinhoodSellFee = sell;
+    this.saveState(state);
+    return { buy, sell };
   }
 }
 
