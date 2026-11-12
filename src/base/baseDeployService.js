@@ -5,6 +5,7 @@ import { ethers } from 'ethers';
 import { config } from '../config.js';
 import { storage } from '../storage.js';
 import { pinataService } from '../pinataService.js';
+import { fetchQuoteUsdPrice, computeClankerMarketCapPosition } from '../utils/marketCapMath.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -350,7 +351,10 @@ export class BaseDeployService {
 
     const ethLp = String(options.ethLiquidity || storage.getBaseDirectLpEth() || config.baseDirectDefaultLpEth || '0.00001');
     const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getBaseDirectDevBuyEth() !== undefined ? storage.getBaseDirectDevBuyEth() : '0.000001'));
-    const ethLpWei = ethers.parseEther(ethLp);
+    const targetMarketCapUsd = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getBaseDirectTargetMcap());
+    const useSingleSidedMcap = targetMarketCapUsd > 0 && dexVersion !== 'v2';
+
+    const ethLpWei = useSingleSidedMcap ? 0n : ethers.parseEther(ethLp);
     const devBuyWei = ethers.parseEther(devBuyEth);
     const gasReserveWei = ethers.parseEther('0.0001'); // Gas reserve on Base L2 (~0.01 Gwei)
     const totalRequiredWei = ethLpWei + devBuyWei + gasReserveWei;
@@ -358,7 +362,7 @@ export class BaseDeployService {
     if (balance < totalRequiredWei) {
       const curEth = ethers.formatEther(balance);
       const reqEth = ethers.formatEther(totalRequiredWei);
-      throw new Error(`Saldo ETH di Base tidak mencukupi! Anda memiliki ${curEth} ETH, dibutuhkan minimal ${reqEth} ETH (LP ${ethLp} ETH + Dev Buy ${devBuyEth} ETH + gas).`);
+      throw new Error(`Saldo ETH di Base tidak mencukupi! Anda memiliki ${curEth} ETH, dibutuhkan minimal ${reqEth} ETH (${useSingleSidedMcap ? 'Mode MCap $' + targetMarketCapUsd + ' 0 ETH LP' : 'LP ' + ethLp + ' ETH'} + Dev Buy ${devBuyEth} ETH + gas).`);
     }
 
     // Resolve Quote Token (ETH, USDC, WETH)
@@ -436,79 +440,76 @@ export class BaseDeployService {
     let addLiquidityTxHash = '';
     let positionTokenId = null;
     let initialPrice = 0;
+    let realizedMcapUsd = 0;
     let quoteDepositedDisplay = `${ethLp} ${quoteSymbol}`;
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
     if (dexVersion === 'v4') {
-      notify(4, `Menyiapkan likuiditas Uniswap V4 (Pair: ${symbol}/${quoteSymbol})...`);
+      notify(4, `Menyiapkan likuiditas Uniswap V4 (Pair: ${symbol}/${quoteSymbol}${useSingleSidedMcap ? `, Target MCap $${targetMarketCapUsd.toLocaleString()}` : ''})...`);
       const posm = new ethers.Contract(this.v4PositionManager, V4_POSITION_MANAGER_ABI, wallet);
       const permit2 = new ethers.Contract(this.permit2Address, PERMIT2_ABI, wallet);
       const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
 
-      let quoteDepositWei;
-      let quoteAddressV4;
+      let quoteDepositWei = 0n;
+      let quoteAddressV4 = quoteSymbol === 'USDC' ? this.usdcAddress : (quoteSymbol === 'WETH' ? this.wethAddress : ethers.ZeroAddress);
 
-      if (quoteSymbol === 'USDC') {
-        const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
-        let curUsdc = await usdcContract.balanceOf(wallet.address);
+      if (!useSingleSidedMcap) {
+        if (quoteSymbol === 'USDC') {
+          const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
+          let curUsdc = await usdcContract.balanceOf(wallet.address);
 
-        if (curUsdc < 1000n) {
-          notify(4, `Menukar ${ethLp} ETH ke USDC via Uniswap V3 Router untuk pasangan pool...`);
+          if (curUsdc < 1000n) {
+            notify(4, `Menukar ${ethLp} ETH ke USDC via Uniswap V3 Router untuk pasangan pool...`);
+            const wrapTx = await wethContract.deposit({ value: ethLpWei });
+            await wrapTx.wait();
+            const appWethTx = await wethContract.approve(this.v3SwapRouter, ethLpWei);
+            await appWethTx.wait();
+
+            const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
+            const deadline = Math.floor(Date.now() / 1000) + 600;
+            const swapTx = await swapRouter.exactInputSingle({
+              tokenIn: this.wethAddress,
+              tokenOut: this.usdcAddress,
+              fee: 500, // 0.05% WETH/USDC tier
+              recipient: wallet.address,
+              deadline,
+              amountIn: ethLpWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await swapTx.wait();
+            curUsdc = await usdcContract.balanceOf(wallet.address);
+            notify(4, `Konversi USDC berhasil: ${ethers.formatUnits(curUsdc, 6)} USDC!`);
+          }
+
+          quoteDepositWei = curUsdc;
+          quoteDepositedDisplay = `${ethers.formatUnits(curUsdc, 6)} USDC`;
+          initialPrice = Number(ethers.formatUnits(curUsdc, 6)) / Number(ethers.formatUnits(tokenLp, 18));
+
+          const appUsdcTx = await usdcContract.approve(this.permit2Address, ethers.MaxUint256);
+          await appUsdcTx.wait();
+          const p2AppUsdc = await permit2.approve(this.usdcAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
+          await p2AppUsdc.wait();
+          await pace();
+        } else if (quoteSymbol === 'WETH') {
+          quoteDepositWei = ethLpWei;
+          quoteDepositedDisplay = `${ethLp} WETH`;
+          initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
+
+          notify(4, `Wrapping ${ethLp} ETH menjadi WETH...`);
           const wrapTx = await wethContract.deposit({ value: ethLpWei });
           await wrapTx.wait();
-          const appWethTx = await wethContract.approve(this.v3SwapRouter, ethLpWei);
+          const appWethTx = await wethContract.approve(this.permit2Address, ethers.MaxUint256);
           await appWethTx.wait();
-
-          const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
-          const deadline = Math.floor(Date.now() / 1000) + 600;
-          const swapTx = await swapRouter.exactInputSingle({
-            tokenIn: this.wethAddress,
-            tokenOut: this.usdcAddress,
-            fee: 500, // 0.05% WETH/USDC tier
-            recipient: wallet.address,
-            deadline,
-            amountIn: ethLpWei,
-            amountOutMinimum: 0n,
-            sqrtPriceLimitX96: 0n
-          });
-          await swapTx.wait();
-          curUsdc = await usdcContract.balanceOf(wallet.address);
-          notify(4, `Konversi USDC berhasil: ${ethers.formatUnits(curUsdc, 6)} USDC!`);
+          const p2AppWeth = await permit2.approve(this.wethAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
+          await p2AppWeth.wait();
+          await pace();
+        } else {
+          quoteDepositWei = ethLpWei;
+          quoteDepositedDisplay = `${ethLp} ETH`;
+          initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
         }
-
-        quoteDepositWei = curUsdc;
-        quoteDepositedDisplay = `${ethers.formatUnits(curUsdc, 6)} USDC`;
-        quoteAddressV4 = this.usdcAddress;
-        initialPrice = Number(ethers.formatUnits(curUsdc, 6)) / Number(ethers.formatUnits(tokenLp, 18));
-
-        // Approve USDC to Permit2 & PositionManager
-        const appUsdcTx = await usdcContract.approve(this.permit2Address, ethers.MaxUint256);
-        await appUsdcTx.wait();
-        const p2AppUsdc = await permit2.approve(this.usdcAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
-        await p2AppUsdc.wait();
-        await pace();
-
-      } else if (quoteSymbol === 'WETH') {
-        quoteDepositWei = ethLpWei;
-        quoteDepositedDisplay = `${ethLp} WETH`;
-        quoteAddressV4 = this.wethAddress;
-        initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
-
-        notify(4, `Wrapping ${ethLp} ETH menjadi WETH...`);
-        const wrapTx = await wethContract.deposit({ value: ethLpWei });
-        await wrapTx.wait();
-        const appWethTx = await wethContract.approve(this.permit2Address, ethers.MaxUint256);
-        await appWethTx.wait();
-        const p2AppWeth = await permit2.approve(this.wethAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
-        await p2AppWeth.wait();
-        await pace();
-      } else {
-        // Native ETH (Address 0 in Uniswap V4)
-        quoteDepositWei = ethLpWei;
-        quoteDepositedDisplay = `${ethLp} ETH`;
-        quoteAddressV4 = ethers.ZeroAddress;
-        initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
       }
 
       // Approve Meme Token ke Permit2 & PositionManager
@@ -519,17 +520,53 @@ export class BaseDeployService {
       await p2AppToken.wait();
       await pace();
 
-      // Uniswap V4 Token Ordering (currency0 strictly < currency1)
-      const isToken0 = quoteAddressV4 === ethers.ZeroAddress
-        ? false
-        : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddressV4.toLowerCase()));
-
-      const currency0 = isToken0 ? tokenAddress : quoteAddressV4;
-      const currency1 = isToken0 ? quoteAddressV4 : tokenAddress;
-      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
-      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
-
       const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
+      let currency0, currency1, amount0Desired, amount1Desired, sqrtPriceX96, tickLower, tickUpper, liquidity;
+
+      if (useSingleSidedMcap) {
+        const quoteUsdPrice = await fetchQuoteUsdPrice(quoteSymbol);
+        const mcapPos = computeClankerMarketCapPosition({
+          targetMarketCapUsd,
+          quoteUsdPrice,
+          totalSupplyWei: totalSupply,
+          tokenDecimals: 18,
+          quoteDecimals,
+          tokenAddress,
+          quoteAddress: quoteAddressV4,
+          tokenLpWei: tokenLp,
+          feeTier
+        });
+        currency0 = mcapPos.currency0;
+        currency1 = mcapPos.currency1;
+        amount0Desired = mcapPos.amount0Desired;
+        amount1Desired = mcapPos.amount1Desired;
+        sqrtPriceX96 = mcapPos.sqrtPriceX96;
+        tickLower = mcapPos.tickLower;
+        tickUpper = mcapPos.tickUpper;
+        liquidity = mcapPos.liquidity;
+        initialPrice = mcapPos.initialPriceQuotePerToken;
+        realizedMcapUsd = Math.round(mcapPos.initialMcapUsd);
+        quoteDepositedDisplay = `0 ${quoteSymbol} (Single-Sided MCap $${realizedMcapUsd.toLocaleString()})`;
+      } else {
+        const isToken0 = quoteAddressV4 === ethers.ZeroAddress
+          ? false
+          : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddressV4.toLowerCase()));
+
+        currency0 = isToken0 ? tokenAddress : quoteAddressV4;
+        currency1 = isToken0 ? quoteAddressV4 : tokenAddress;
+        amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+        amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+        sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+
+        const minTick = -887200;
+        const maxTick = 887200;
+        tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+        tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+        const spA = getSqrtRatioAtTick(tickLower);
+        const spB = getSqrtRatioAtTick(tickUpper);
+        liquidity = getLiquidityForAmounts(sqrtPriceX96, spA, spB, amount0Desired, amount1Desired);
+      }
+
       const poolKey = {
         currency0,
         currency1,
@@ -541,9 +578,6 @@ export class BaseDeployService {
       const poolId = computePoolId(poolKey);
       poolAddress = poolId;
 
-      // SqrtPriceX96 Calculation
-      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
-
       notify(4, `Menginisialisasi Pool Uniswap V4 di Base (PoolId: ${poolId.slice(0, 10)}...)...`);
       try {
         const initTx = await posm.initializePool(poolKey, sqrtPriceX96);
@@ -552,15 +586,6 @@ export class BaseDeployService {
       } catch (initErr) {
         console.warn('[BaseDeploy] initializePool notice:', initErr.message);
       }
-
-      // Full-Range Tick Calculation
-      const minTick = -887200;
-      const maxTick = 887200;
-      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
-      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
-      const spA = getSqrtRatioAtTick(tickLower);
-      const spB = getSqrtRatioAtTick(tickUpper);
-      const liquidity = getLiquidityForAmounts(sqrtPriceX96, spA, spB, amount0Desired, amount1Desired);
 
       // Actions: MINT_POSITION (0x02), SETTLE_PAIR (0x0d), SWEEP (0x14)
       const actions = '0x020d14';
@@ -596,71 +621,105 @@ export class BaseDeployService {
       await pace();
 
     } else if (dexVersion === 'v3') {
-      notify(4, `Menyiapkan likuiditas Uniswap V3 di Base (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%)...`);
+      notify(4, `Menyiapkan likuiditas Uniswap V3 di Base (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%${useSingleSidedMcap ? `, Target MCap $${targetMarketCapUsd.toLocaleString()}` : ''})...`);
       const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
       const npm = new ethers.Contract(this.v3PositionManager, POSITION_MANAGER_ABI, wallet);
       const factory = new ethers.Contract(this.v3Factory, V3_FACTORY_ABI, wallet);
 
-      let quoteDepositWei;
+      let quoteDepositWei = 0n;
+      const pairTokenAddress = quoteSymbol === 'USDC' ? this.usdcAddress : this.wethAddress;
 
-      if (quoteSymbol === 'USDC') {
-        const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
-        let curUsdc = await usdcContract.balanceOf(wallet.address);
+      if (!useSingleSidedMcap) {
+        if (quoteSymbol === 'USDC') {
+          const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
+          let curUsdc = await usdcContract.balanceOf(wallet.address);
 
-        if (curUsdc < 1000n) {
-          notify(4, `Menukar ${ethLp} ETH ke USDC via Uniswap V3 Router...`);
+          if (curUsdc < 1000n) {
+            notify(4, `Menukar ${ethLp} ETH ke USDC via Uniswap V3 Router...`);
+            const wrapTx = await wethContract.deposit({ value: ethLpWei });
+            await wrapTx.wait();
+            const appWethTx = await wethContract.approve(this.v3SwapRouter, ethLpWei);
+            await appWethTx.wait();
+
+            const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
+            const deadline = Math.floor(Date.now() / 1000) + 600;
+            const swapTx = await swapRouter.exactInputSingle({
+              tokenIn: this.wethAddress,
+              tokenOut: this.usdcAddress,
+              fee: 500,
+              recipient: wallet.address,
+              deadline,
+              amountIn: ethLpWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await swapTx.wait();
+            curUsdc = await usdcContract.balanceOf(wallet.address);
+            notify(4, `Konversi USDC berhasil: ${ethers.formatUnits(curUsdc, 6)} USDC!`);
+          }
+
+          quoteDepositWei = curUsdc;
+          quoteDepositedDisplay = `${ethers.formatUnits(curUsdc, 6)} USDC`;
+          initialPrice = Number(ethers.formatUnits(curUsdc, 6)) / Number(ethers.formatUnits(tokenLp, 18));
+
+          const appUsdcTx = await usdcContract.approve(this.v3PositionManager, quoteDepositWei);
+          await appUsdcTx.wait();
+        } else {
+          quoteDepositWei = ethLpWei;
+          quoteDepositedDisplay = `${ethLp} ${quoteSymbol}`;
+          initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
+
+          notify(4, `Deposit & Wrap ${ethLp} ETH ke WETH...`);
           const wrapTx = await wethContract.deposit({ value: ethLpWei });
           await wrapTx.wait();
-          const appWethTx = await wethContract.approve(this.v3SwapRouter, ethLpWei);
+          const appWethTx = await wethContract.approve(this.v3PositionManager, ethLpWei);
           await appWethTx.wait();
-
-          const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
-          const deadline = Math.floor(Date.now() / 1000) + 600;
-          const swapTx = await swapRouter.exactInputSingle({
-            tokenIn: this.wethAddress,
-            tokenOut: this.usdcAddress,
-            fee: 500,
-            recipient: wallet.address,
-            deadline,
-            amountIn: ethLpWei,
-            amountOutMinimum: 0n,
-            sqrtPriceLimitX96: 0n
-          });
-          await swapTx.wait();
-          curUsdc = await usdcContract.balanceOf(wallet.address);
-          notify(4, `Konversi USDC berhasil: ${ethers.formatUnits(curUsdc, 6)} USDC!`);
         }
-
-        quoteDepositWei = curUsdc;
-        quoteDepositedDisplay = `${ethers.formatUnits(curUsdc, 6)} USDC`;
-        initialPrice = Number(ethers.formatUnits(curUsdc, 6)) / Number(ethers.formatUnits(tokenLp, 18));
-
-        const appUsdcTx = await usdcContract.approve(this.v3PositionManager, quoteDepositWei);
-        await appUsdcTx.wait();
-      } else {
-        quoteDepositWei = ethLpWei;
-        quoteDepositedDisplay = `${ethLp} ${quoteSymbol}`;
-        initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
-
-        notify(4, `Deposit & Wrap ${ethLp} ETH ke WETH...`);
-        const wrapTx = await wethContract.deposit({ value: ethLpWei });
-        await wrapTx.wait();
-        const appWethTx = await wethContract.approve(this.v3PositionManager, ethLpWei);
-        await appWethTx.wait();
       }
 
       notify(4, `Approve ${symbol} ke Uniswap V3 PositionManager...`);
       const appTokenTx = await tokenContract.approve(this.v3PositionManager, tokenLp);
       await appTokenTx.wait();
 
-      const pairTokenAddress = quoteSymbol === 'USDC' ? this.usdcAddress : this.wethAddress;
-      const isToken0 = BigInt(tokenAddress.toLowerCase()) < BigInt(pairTokenAddress.toLowerCase());
-      const token0 = isToken0 ? tokenAddress : pairTokenAddress;
-      const token1 = isToken0 ? pairTokenAddress : tokenAddress;
-      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
-      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+      const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
+      let token0, token1, amount0Desired, amount1Desired, sqrtPriceX96, tickLower, tickUpper;
 
-      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+      if (useSingleSidedMcap) {
+        const quoteUsdPrice = await fetchQuoteUsdPrice(quoteSymbol);
+        const mcapPos = computeClankerMarketCapPosition({
+          targetMarketCapUsd,
+          quoteUsdPrice,
+          totalSupplyWei: totalSupply,
+          tokenDecimals: 18,
+          quoteDecimals,
+          tokenAddress,
+          quoteAddress: pairTokenAddress,
+          tokenLpWei: tokenLp,
+          feeTier
+        });
+        token0 = mcapPos.currency0;
+        token1 = mcapPos.currency1;
+        amount0Desired = mcapPos.amount0Desired;
+        amount1Desired = mcapPos.amount1Desired;
+        sqrtPriceX96 = mcapPos.sqrtPriceX96;
+        tickLower = mcapPos.tickLower;
+        tickUpper = mcapPos.tickUpper;
+        initialPrice = mcapPos.initialPriceQuotePerToken;
+        realizedMcapUsd = Math.round(mcapPos.initialMcapUsd);
+        quoteDepositedDisplay = `0 ${quoteSymbol} (Single-Sided MCap $${realizedMcapUsd.toLocaleString()})`;
+      } else {
+        const isToken0 = BigInt(tokenAddress.toLowerCase()) < BigInt(pairTokenAddress.toLowerCase());
+        token0 = isToken0 ? tokenAddress : pairTokenAddress;
+        token1 = isToken0 ? pairTokenAddress : tokenAddress;
+        amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+        amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+        sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+
+        const minTick = -887200;
+        const maxTick = 887200;
+        tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+        tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+      }
 
       notify(4, 'Membuat & menginisialisasi Pool Uniswap V3 di Base...');
       let existingPool = await factory.getPool(token0, token1, feeTier);
@@ -672,11 +731,6 @@ export class BaseDeployService {
         poolAddress = existingPool;
       }
 
-      const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
-      const minTick = -887200;
-      const maxTick = 887200;
-      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
-      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
       const deadline = Math.floor(Date.now() / 1000) + 1200;
 
       notify(4, 'Menyetor likuiditas ke Uniswap V3 PositionManager...');
@@ -759,16 +813,32 @@ export class BaseDeployService {
     // Step 7: Dev Buy
     let devBuyTxHash = '';
     if (devBuyWei > 0n) {
-      if (dexVersion === 'v4') {
-        notify(7, `Menjalankan Dev Buy sebesar ${devBuyEth} ETH via Uniswap V4 (UniversalRouter)...`);
+      if (dexVersion === 'v4' && (quoteSymbol === 'ETH' || quoteSymbol === 'WETH')) {
+        notify(7, `Menjalankan Dev Buy sebesar ${devBuyEth} ${quoteSymbol} via Uniswap V4 (UniversalRouter)...`);
         try {
           const ur = new ethers.Contract(this.universalRouter, UNIVERSAL_ROUTER_ABI, wallet);
           const deadline = Math.floor(Date.now() / 1000) + 600;
+          const quoteAddrV4 = quoteSymbol === 'ETH' ? ethers.ZeroAddress : this.wethAddress;
+
+          if (quoteSymbol === 'WETH') {
+            const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
+            const permit2 = new ethers.Contract(this.permit2Address, PERMIT2_ABI, wallet);
+            await (await wethContract.deposit({ value: devBuyWei })).wait();
+            await (await wethContract.approve(this.permit2Address, ethers.MaxUint256)).wait();
+            await (await permit2.approve(this.wethAddress, this.universalRouter, '1461501637330902918203684832716283019655932542975', 281474976710655)).wait();
+          }
+
+          const isToken0 = quoteAddrV4 === ethers.ZeroAddress
+            ? false
+            : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddrV4.toLowerCase()));
+          const currency0 = isToken0 ? tokenAddress : quoteAddrV4;
+          const currency1 = isToken0 ? quoteAddrV4 : tokenAddress;
+          const zeroForOne = !isToken0;
 
           const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
           const poolKey = {
-            currency0: ethers.ZeroAddress,
-            currency1: tokenAddress,
+            currency0,
+            currency1,
             fee: feeTier,
             tickSpacing,
             hooks: ethers.ZeroAddress
@@ -778,20 +848,20 @@ export class BaseDeployService {
             [EXACT_INPUT_SINGLE_TYPE],
             [{
               poolKey,
-              zeroForOne: true,
+              zeroForOne,
               amountIn: devBuyWei,
               amountOutMinimum: 0n,
               hookData: '0x'
             }]
           );
-          const p1 = abiCoder.encode(['address', 'uint256', 'bool'], [ethers.ZeroAddress, devBuyWei, false]);
+          const p1 = abiCoder.encode(['address', 'uint256', 'bool'], [quoteAddrV4, devBuyWei, quoteSymbol !== 'ETH']);
           const p2 = abiCoder.encode(['address', 'address', 'uint256'], [tokenAddress, wallet.address, 0n]);
 
           const v4Input = abiCoder.encode(['bytes', 'bytes[]'], ['0x060b0e', [p0, p1, p2]]);
-          const buyTx = await ur.execute('0x10', [v4Input], deadline, { value: devBuyWei });
+          const buyTx = await ur.execute('0x10', [v4Input], deadline, { value: quoteSymbol === 'ETH' ? devBuyWei : 0n });
           await buyTx.wait();
           devBuyTxHash = buyTx.hash;
-          notify(7, `Dev Buy Uniswap V4 sebesar ${devBuyEth} ETH berhasil dieksekusi! Tx: ${devBuyTxHash}`);
+          notify(7, `Dev Buy Uniswap V4 sebesar ${devBuyEth} ${quoteSymbol} berhasil dieksekusi! Tx: ${devBuyTxHash}`);
           await pace();
         } catch (buyErr) {
           console.warn('[BaseDeploy] Dev Buy V4 warning:', buyErr.message);
@@ -866,7 +936,8 @@ export class BaseDeployService {
       dexVersion: dexVersion === 'v4' ? 'Uniswap V4' : (dexVersion === 'v3' ? 'Uniswap V3' : 'Uniswap V2'),
       pairToken: quoteSymbol,
       quoteDeposited: quoteDepositedDisplay,
-      ethDeposited: ethLp,
+      ethDeposited: useSingleSidedMcap ? '0' : ethLp,
+      targetMarketCapUsd: useSingleSidedMcap ? (realizedMcapUsd || targetMarketCapUsd) : 0,
       devBuyEth: Number(devBuyEth) > 0 ? devBuyEth : '0',
       tokenDeposited: '20,000,000,000',
       initialPriceEth: initialPrice,
@@ -919,7 +990,8 @@ export class BaseDeployService {
         devBuyEth: Number(devBuyEth) > 0 ? `${devBuyEth} ETH` : '0 ETH',
         quoteDeposited: quoteDepositedDisplay,
         tokensDeposited: '20,000,000,000',
-        initialPrice
+        initialPrice,
+        targetMarketCapUsd: useSingleSidedMcap ? (realizedMcapUsd || targetMarketCapUsd) : 0
       },
       positionTokenId,
       urls: {

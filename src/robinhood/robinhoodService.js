@@ -5,6 +5,7 @@ import { ethers } from 'ethers';
 import { config } from '../config.js';
 import { storage } from '../storage.js';
 import { pinataService } from '../pinataService.js';
+import { fetchQuoteUsdPrice, computeClankerMarketCapPosition } from '../utils/marketCapMath.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -293,7 +294,10 @@ export class RobinhoodService {
 
     const ethLp     = String(options.ethLiquidity || storage.getRobinhoodLpEth() || config.robinhoodDefaultLpEth || '0.00001');
     const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getRobinhoodDevBuyEth() ?? '0.000001'));
-    const ethLpWei  = ethers.parseEther(ethLp);
+    const targetMarketCapUsd = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getRobinhoodTargetMcap());
+    const useSingleSidedMcap = targetMarketCapUsd > 0 && dexVersion !== 'v2';
+
+    const ethLpWei  = useSingleSidedMcap ? 0n : ethers.parseEther(ethLp);
     const devBuyWei = ethers.parseEther(devBuyEth);
     const gasReserveWei = ethers.parseEther('0.0005');
     const totalRequiredWei = ethLpWei + devBuyWei + gasReserveWei;
@@ -301,7 +305,7 @@ export class RobinhoodService {
     if (balance < totalRequiredWei) {
       const curEth = ethers.formatEther(balance);
       const reqEth = ethers.formatEther(totalRequiredWei);
-      throw new Error(`Saldo ETH tidak mencukupi di Robinhood Chain! Anda memiliki ${curEth} ETH, dibutuhkan minimal ${reqEth} ETH (LP ${ethLp} + Dev Buy ${devBuyEth} + gas).`);
+      throw new Error(`Saldo ETH tidak mencukupi di Robinhood Chain! Anda memiliki ${curEth} ETH, dibutuhkan minimal ${reqEth} ETH (${useSingleSidedMcap ? 'Mode MCap $' + targetMarketCapUsd + ' 0 ETH LP' : 'LP ' + ethLp + ' ETH'} + Dev Buy ${devBuyEth} + gas).`);
     }
 
     // Resolve Quote Token
@@ -416,45 +420,44 @@ export class RobinhoodService {
     let positionTokenId = null;
     let quoteDepositedDisplay = '';
     let initialPrice = 0;
+    let realizedMcapUsd = 0;
 
     if (dexVersion === 'v4') {
-      notify(5, `Menyiapkan likuiditas Uniswap V4 (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%)...`);
+      notify(5, `Menyiapkan likuiditas Uniswap V4 (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%${useSingleSidedMcap ? `, Target MCap $${targetMarketCapUsd.toLocaleString()}` : ''})...`);
       const posm   = new ethers.Contract(this.v4PositionManager, V4_POSITION_MANAGER_ABI, wallet);
       const permit2 = new ethers.Contract(this.permit2Address, PERMIT2_ABI, wallet);
 
-      let quoteDepositWei  = ethLpWei;
-      let quoteAddressV4   = quoteAddress;
+      let quoteDepositWei  = 0n;
+      let quoteAddressV4   = quoteSymbol === 'USDG' ? this.usdgAddress : (quoteSymbol === 'WETH' ? this.wethAddress : ethers.ZeroAddress);
 
-      if (quoteSymbol === 'USDG') {
-        const usdgContract = new ethers.Contract(this.usdgAddress, ERC20_ABI, wallet);
-        quoteDepositWei = await usdgContract.balanceOf(wallet.address);
-        if (quoteDepositWei === 0n) {
-          throw new Error('Saldo USDG di deployer wallet kosong (0 USDG)! Silakan isi USDG atau ganti pair ke ETH / WETH via /rhpair ETH.');
+      if (!useSingleSidedMcap) {
+        if (quoteSymbol === 'USDG') {
+          const usdgContract = new ethers.Contract(this.usdgAddress, ERC20_ABI, wallet);
+          quoteDepositWei = await usdgContract.balanceOf(wallet.address);
+          if (quoteDepositWei === 0n) {
+            throw new Error('Saldo USDG di deployer wallet kosong (0 USDG)! Silakan isi USDG atau ganti pair ke ETH / WETH via /rhpair ETH.');
+          }
+          quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 18)} USDG`;
+          initialPrice = Number(ethers.formatUnits(quoteDepositWei, 18)) / Number(ethers.formatUnits(tokenLp, 18));
+          const appUsdg = await usdgContract.approve(this.permit2Address, ethers.MaxUint256);
+          await appUsdg.wait();
+          await permit2.approve(this.usdgAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
+          await pace();
+        } else if (quoteSymbol === 'WETH') {
+          quoteDepositWei = ethLpWei;
+          quoteDepositedDisplay = `${ethLp} WETH`;
+          initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
+          notify(5, 'Wrap ETH -> WETH & Approve Permit2...');
+          const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
+          await (await wethContract.deposit({ value: ethLpWei })).wait();
+          await (await wethContract.approve(this.permit2Address, ethers.MaxUint256)).wait();
+          await permit2.approve(this.wethAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
+          await pace();
+        } else {
+          quoteDepositWei = ethLpWei;
+          quoteDepositedDisplay = `${ethLp} ETH`;
+          initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
         }
-        quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 18)} USDG`;
-        quoteAddressV4 = this.usdgAddress;
-        initialPrice = Number(ethers.formatUnits(quoteDepositWei, 18)) / Number(ethers.formatUnits(tokenLp, 18));
-        const appUsdg = await usdgContract.approve(this.permit2Address, ethers.MaxUint256);
-        await appUsdg.wait();
-        await permit2.approve(this.usdgAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
-        await pace();
-      } else if (quoteSymbol === 'WETH') {
-        quoteDepositWei = ethLpWei;
-        quoteDepositedDisplay = `${ethLp} WETH`;
-        quoteAddressV4 = this.wethAddress;
-        initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
-        notify(5, 'Wrap ETH -> WETH & Approve Permit2...');
-        const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
-        await (await wethContract.deposit({ value: ethLpWei })).wait();
-        await (await wethContract.approve(this.permit2Address, ethers.MaxUint256)).wait();
-        await permit2.approve(this.wethAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
-        await pace();
-      } else {
-        // Native ETH
-        quoteDepositWei = ethLpWei;
-        quoteDepositedDisplay = `${ethLp} ETH`;
-        quoteAddressV4 = ethers.ZeroAddress;
-        initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
       }
 
       // Approve Token
@@ -463,21 +466,57 @@ export class RobinhoodService {
       await permit2.approve(tokenAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
       await pace();
 
-      const isToken0 = quoteAddressV4 === ethers.ZeroAddress
-        ? false
-        : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddressV4.toLowerCase()));
-
-      const currency0      = isToken0 ? tokenAddress : quoteAddressV4;
-      const currency1      = isToken0 ? quoteAddressV4 : tokenAddress;
-      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
-      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
-
       const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
+      let currency0, currency1, amount0Desired, amount1Desired, sqrtPriceX96, tickLower, tickUpper, liquidity;
+
+      if (useSingleSidedMcap) {
+        const quoteUsdPrice = await fetchQuoteUsdPrice(quoteSymbol);
+        const mcapPos = computeClankerMarketCapPosition({
+          targetMarketCapUsd,
+          quoteUsdPrice,
+          totalSupplyWei: totalSupply,
+          tokenDecimals: 18,
+          quoteDecimals,
+          tokenAddress,
+          quoteAddress: quoteAddressV4,
+          tokenLpWei: tokenLp,
+          feeTier
+        });
+        currency0 = mcapPos.currency0;
+        currency1 = mcapPos.currency1;
+        amount0Desired = mcapPos.amount0Desired;
+        amount1Desired = mcapPos.amount1Desired;
+        sqrtPriceX96 = mcapPos.sqrtPriceX96;
+        tickLower = mcapPos.tickLower;
+        tickUpper = mcapPos.tickUpper;
+        liquidity = mcapPos.liquidity;
+        initialPrice = mcapPos.initialPriceQuotePerToken;
+        realizedMcapUsd = Math.round(mcapPos.initialMcapUsd);
+        quoteDepositedDisplay = `0 ${quoteSymbol} (Single-Sided MCap $${realizedMcapUsd.toLocaleString()})`;
+      } else {
+        const isToken0 = quoteAddressV4 === ethers.ZeroAddress
+          ? false
+          : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddressV4.toLowerCase()));
+
+        currency0      = isToken0 ? tokenAddress : quoteAddressV4;
+        currency1      = isToken0 ? quoteAddressV4 : tokenAddress;
+        amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+        amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+        sqrtPriceX96   = encodePriceSqrt(amount1Desired, amount0Desired);
+
+        const minTick = -887200;
+        const maxTick = 887200;
+        tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+        tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+        const spA       = getSqrtRatioAtTick(tickLower);
+        const spB       = getSqrtRatioAtTick(tickUpper);
+        liquidity = getLiquidityForAmounts(sqrtPriceX96, spA, spB, amount0Desired, amount1Desired);
+      }
+
       const poolKey = { currency0, currency1, fee: feeTier, tickSpacing, hooks: ethers.ZeroAddress };
       const poolId = computePoolId(poolKey);
       poolAddress = poolId;
 
-      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
       notify(5, `Menginisialisasi Pool Uniswap V4 (PoolId: ${poolId.slice(0, 10)}...)...`);
       try {
         const initTx = await posm.initializePool(poolKey, sqrtPriceX96);
@@ -486,14 +525,6 @@ export class RobinhoodService {
       } catch (initErr) {
         console.warn('[RobinhoodService] initializePool notice:', initErr.message);
       }
-
-      const minTick = -887200;
-      const maxTick = 887200;
-      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
-      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
-      const spA       = getSqrtRatioAtTick(tickLower);
-      const spB       = getSqrtRatioAtTick(tickUpper);
-      const liquidity = getLiquidityForAmounts(sqrtPriceX96, spA, spB, amount0Desired, amount1Desired);
 
       const actions = '0x020d14';
       const param0  = abiCoder.encode(
@@ -527,41 +558,76 @@ export class RobinhoodService {
       await pace();
 
     } else if (dexVersion === 'v3') {
-      notify(5, `Menyiapkan likuiditas Uniswap V3 (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%)...`);
+      notify(5, `Menyiapkan likuiditas Uniswap V3 (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%${useSingleSidedMcap ? `, Target MCap $${targetMarketCapUsd.toLocaleString()}` : ''})...`);
       const npm      = new ethers.Contract(this.v3PositionManager, POSITION_MANAGER_ABI, wallet);
       const factory  = new ethers.Contract(this.v3Factory, V3_FACTORY_ABI, wallet);
       const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
 
-      let quoteDepositWei;
+      let quoteDepositWei = 0n;
+      const pairTokenAddress = quoteSymbol === 'USDG' ? this.usdgAddress : this.wethAddress;
 
-      if (quoteSymbol === 'USDG') {
-        const usdgContract = new ethers.Contract(this.usdgAddress, ERC20_ABI, wallet);
-        quoteDepositWei = await usdgContract.balanceOf(wallet.address);
-        if (quoteDepositWei === 0n) {
-          throw new Error('Saldo USDG di deployer wallet kosong (0 USDG)! Silakan isi USDG atau ganti pair ke ETH / WETH via /rhpair ETH.');
+      if (!useSingleSidedMcap) {
+        if (quoteSymbol === 'USDG') {
+          const usdgContract = new ethers.Contract(this.usdgAddress, ERC20_ABI, wallet);
+          quoteDepositWei = await usdgContract.balanceOf(wallet.address);
+          if (quoteDepositWei === 0n) {
+            throw new Error('Saldo USDG di deployer wallet kosong (0 USDG)! Silakan isi USDG atau ganti pair ke ETH / WETH via /rhpair ETH.');
+          }
+          quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 18)} USDG`;
+          await (await usdgContract.approve(this.v3PositionManager, ethers.MaxUint256)).wait();
+          initialPrice = Number(ethers.formatUnits(quoteDepositWei, 18)) / Number(ethers.formatUnits(tokenLp, 18));
+        } else {
+          quoteDepositWei = ethLpWei;
+          quoteDepositedDisplay = `${ethLp} ${quoteSymbol}`;
+          notify(5, `Wrap ${ethLp} ETH -> WETH & Approve PositionManager...`);
+          await (await wethContract.deposit({ value: ethLpWei })).wait();
+          await (await wethContract.approve(this.v3PositionManager, ethers.MaxUint256)).wait();
+          initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
         }
-        quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 18)} USDG`;
-        await (await usdgContract.approve(this.v3PositionManager, ethers.MaxUint256)).wait();
-        initialPrice = Number(ethers.formatUnits(quoteDepositWei, 18)) / Number(ethers.formatUnits(tokenLp, 18));
-      } else {
-        quoteDepositWei = ethLpWei;
-        quoteDepositedDisplay = `${ethLp} ${quoteSymbol}`;
-        notify(5, `Wrap ${ethLp} ETH -> WETH & Approve PositionManager...`);
-        await (await wethContract.deposit({ value: ethLpWei })).wait();
-        await (await wethContract.approve(this.v3PositionManager, ethers.MaxUint256)).wait();
-        quoteAddress = this.wethAddress;
-        initialPrice = Number(ethLp) / Number(ethers.formatUnits(tokenLp, 18));
       }
 
       await (await tokenContract.approve(this.v3PositionManager, ethers.MaxUint256)).wait();
       await pace();
 
-      const isToken0     = tokenAddress.toLowerCase() < quoteAddress.toLowerCase();
-      const token0       = isToken0 ? tokenAddress : quoteAddress;
-      const token1       = isToken0 ? quoteAddress : tokenAddress;
-      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
-      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
-      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+      const tickSpacing = Number(await factory.feeAmountTickSpacing(feeTier));
+      let token0, token1, amount0Desired, amount1Desired, sqrtPriceX96, tickLower, tickUpper;
+
+      if (useSingleSidedMcap) {
+        const quoteUsdPrice = await fetchQuoteUsdPrice(quoteSymbol);
+        const mcapPos = computeClankerMarketCapPosition({
+          targetMarketCapUsd,
+          quoteUsdPrice,
+          totalSupplyWei: totalSupply,
+          tokenDecimals: 18,
+          quoteDecimals,
+          tokenAddress,
+          quoteAddress: pairTokenAddress,
+          tokenLpWei: tokenLp,
+          feeTier
+        });
+        token0 = mcapPos.currency0;
+        token1 = mcapPos.currency1;
+        amount0Desired = mcapPos.amount0Desired;
+        amount1Desired = mcapPos.amount1Desired;
+        sqrtPriceX96 = mcapPos.sqrtPriceX96;
+        tickLower = mcapPos.tickLower;
+        tickUpper = mcapPos.tickUpper;
+        initialPrice = mcapPos.initialPriceQuotePerToken;
+        realizedMcapUsd = Math.round(mcapPos.initialMcapUsd);
+        quoteDepositedDisplay = `0 ${quoteSymbol} (Single-Sided MCap $${realizedMcapUsd.toLocaleString()})`;
+      } else {
+        const isToken0     = tokenAddress.toLowerCase() < pairTokenAddress.toLowerCase();
+        token0       = isToken0 ? tokenAddress : pairTokenAddress;
+        token1       = isToken0 ? pairTokenAddress : tokenAddress;
+        amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+        amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+        sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+
+        const minTick = -887272;
+        const maxTick = 887272;
+        tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+        tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+      }
 
       notify(5, `Membuat & menginisialisasi Pool Uniswap V3 (Fee: ${feeTier})...`);
       const initTx = await npm.createAndInitializePoolIfNecessary(token0, token1, feeTier, sqrtPriceX96);
@@ -569,13 +635,8 @@ export class RobinhoodService {
       await pace();
 
       poolAddress = await factory.getPool(token0, token1, feeTier);
-      const tickSpacing = Number(await factory.feeAmountTickSpacing(feeTier));
-      const minTick = -887272;
-      const maxTick = 887272;
-      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
-      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
 
-      notify(5, `Menyetor likuiditas penuh (Full-Range Mint) ke Uniswap V3...`);
+      notify(5, `Menyetor likuiditas ke Uniswap V3...`);
       const deadline = Math.floor(Date.now() / 1000) + 1200;
       const mintTx = await npm.mint({
         token0, token1, fee: feeTier, tickLower, tickUpper,
@@ -686,7 +747,9 @@ export class RobinhoodService {
       buyFee, sellFee, dexVersion: dexName,
       pairToken: quoteSymbol,
       quoteDeposited: quoteDepositedDisplay,
-      ethDeposited: ethLp, devBuyEth,
+      ethDeposited: useSingleSidedMcap ? '0' : ethLp,
+      targetMarketCapUsd: useSingleSidedMcap ? (realizedMcapUsd || targetMarketCapUsd) : 0,
+      devBuyEth,
       tokenDeposited: ethers.formatUnits(tokenLp, 18),
       initialPriceEth: initialPrice,
       positionTokenId, v3FeeTier: feeTier,
@@ -726,7 +789,8 @@ export class RobinhoodService {
         dexName, poolAddress, quoteToken: quoteSymbol,
         quoteDeposited: quoteDepositedDisplay,
         positionTokenId,
-        ethDeposited: `${ethLp} ETH`,
+        ethDeposited: useSingleSidedMcap ? '0 ETH' : `${ethLp} ETH`,
+        targetMarketCapUsd: useSingleSidedMcap ? (realizedMcapUsd || targetMarketCapUsd) : 0,
         devBuyEth: devBuyTxHash ? `${devBuyEth} ETH` : (devBuyWei > 0n ? `${devBuyEth} ETH (Attempted)` : '0 ETH'),
         tokensDeposited: `${ethers.formatUnits(tokenLp, 18)} ${symbol}`,
         initialPrice,

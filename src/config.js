@@ -88,6 +88,7 @@ export const config = {
   baseDirectDefaultPair: process.env.BASE_DIRECT_DEFAULT_PAIR || 'ETH',
   baseDirectDefaultLpEth: parseFloat(process.env.BASE_DIRECT_DEFAULT_LP_ETH || '0.00001'),
   baseDirectDevBuyEth: parseFloat(process.env.BASE_DIRECT_DEV_BUY_ETH || '0.000001'),
+  baseDirectDefaultTargetMcap: parseFloat(process.env.BASE_DIRECT_TARGET_MCAP || '35000'),
   baseDirectDefaultTotalSupply: process.env.BASE_DIRECT_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
   baseV4PoolManager: process.env.BASE_V4_POOL_MANAGER || '0x498581fF718922c3f8e6A244956aF099B2652b2b',
   baseV4PositionManager: process.env.BASE_V4_POSITION_MANAGER || '0x7C5f5A4bBd8fD63184577525326123B519429bDc',
@@ -128,6 +129,7 @@ export const config = {
   elysiumDefaultSellFee: parseFloat(process.env.ELYSIUM_DEFAULT_SELL_FEE || '5'),
   elysiumDefaultLpHype: parseFloat(process.env.ELYSIUM_DEFAULT_LP_HYPE || '0.0001'),
   elysiumDevBuyHype: parseFloat(process.env.ELYSIUM_DEV_BUY_HYPE || '0.0001'),
+  elysiumDefaultTargetMcap: parseFloat(process.env.ELYSIUM_TARGET_MCAP || '35000'),
   elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
 
   // Robinhood Chain Settings (Chain ID: 4663, Gas: ETH)
@@ -147,6 +149,7 @@ export const config = {
   robinhoodDefaultPair: process.env.ROBINHOOD_DEFAULT_PAIR || 'ETH',
   robinhoodDefaultLpEth: parseFloat(process.env.ROBINHOOD_DEFAULT_LP_ETH || '0.00001'),
   robinhoodDevBuyEth: parseFloat(process.env.ROBINHOOD_DEV_BUY_ETH || '0.000001'),
+  robinhoodDefaultTargetMcap: parseFloat(process.env.ROBINHOOD_TARGET_MCAP || '35000'),
   robinhoodDefaultTotalSupply: process.env.ROBINHOOD_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
   robinhoodDefaultBuyFee: parseFloat(process.env.ROBINHOOD_DEFAULT_BUY_FEE || '5'),
   robinhoodDefaultSellFee: parseFloat(process.env.ROBINHOOD_DEFAULT_SELL_FEE || '5'),

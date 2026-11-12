@@ -1010,6 +1010,31 @@ export class TelegramBotApp {
       await this.sendRobinhoodHistory(ctx);
     });
 
+    const handleMcapCmd = async (ctx, chain) => {
+      const parts = ctx.message.text.split(' ').slice(1).filter(Boolean);
+      if (parts.length === 0) {
+        return this.sendTargetMcapMenu(ctx, chain);
+      }
+      const raw = parts[0].toLowerCase();
+      const val = (raw === 'off' || raw === '0') ? 0 : parseFloat(raw.replace(/k$/i, '')) * (/k$/i.test(raw) ? 1000 : 1);
+      if (isNaN(val) || val < 0 || val > 1000000000) {
+        return ctx.replyWithHTML('⚠️ Format Target MCap salah! Contoh: <code>35000</code>, <code>35k</code>, <code>50k</code>, atau <code>off</code> (Full Range).');
+      }
+      if (chain === 'base') storage.setBaseDirectTargetMcap(val);
+      else if (chain === 'elys') storage.setElysiumTargetMcap(val);
+      else storage.setRobinhoodTargetMcap(val);
+      const label = chain === 'base' ? 'Base Mandiri' : (chain === 'elys' ? 'Elysium' : 'Robinhood');
+      await ctx.replyWithHTML(
+        val > 0
+          ? `🎯 <b>Target Market Cap ${label} diatur ke $${Math.round(val).toLocaleString('en-US')} USD</b>\n<i>Single-Sided Concentrated LP ala Clanker (0 ETH/HYPE dibutuhkan untuk LP).</i>`
+          : `🦄 <b>Target Market Cap ${label} dinonaktifkan (Mode Full-Range Tradisional)</b>`
+      );
+    };
+
+    bot.command(['basemcap', 'mcapbase'], (ctx) => handleMcapCmd(ctx, 'base'));
+    bot.command(['elysmcap', 'elysiummcap', 'mcapelys'], (ctx) => handleMcapCmd(ctx, 'elys'));
+    bot.command(['rhmcap', 'robinhoodmcap', 'mcaprh'], (ctx) => handleMcapCmd(ctx, 'rh'));
+
     // Action Handlers
     bot.action('cmd_start_menu', async (ctx) => {
       await ctx.answerCbQuery();
@@ -1769,6 +1794,32 @@ export class TelegramBotApp {
       storage.setBaseDirectDexVersion(dex);
       await ctx.answerCbQuery(`DEX diatur ke Uniswap ${dex.toUpperCase()}!`).catch(() => {});
       await this.sendBaseDirectDexMenu(ctx, true);
+    });
+
+    bot.action('cmd_base_mcap_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTargetMcapMenu(ctx, 'base');
+    });
+
+    bot.action('cmd_elys_mcap_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTargetMcapMenu(ctx, 'elys');
+    });
+
+    bot.action('cmd_rh_mcap_menu', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      await this.sendTargetMcapMenu(ctx, 'rh');
+    });
+
+    bot.action(/^set_mcap_(base|elys|rh)_(\d+)$/, async (ctx) => {
+      const chain = ctx.match[1];
+      const val = parseInt(ctx.match[2], 10);
+      if (chain === 'base') storage.setBaseDirectTargetMcap(val);
+      else if (chain === 'elys') storage.setElysiumTargetMcap(val);
+      else storage.setRobinhoodTargetMcap(val);
+      const toast = val > 0 ? `Target MCap diatur ke $${val.toLocaleString('en-US')}!` : 'Mode Full-Range (MCap OFF) diaktifkan!';
+      await ctx.answerCbQuery(toast).catch(() => {});
+      await this.sendTargetMcapMenu(ctx, chain, true);
     });
 
     bot.action('cmd_base_direct_quick_demo', async (ctx) => {
@@ -3283,6 +3334,9 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
     const curDex = storage.getElysiumDexVersion().toUpperCase();
     const curBuyFee = storage.getElysiumBuyFee();
     const curSellFee = storage.getElysiumSellFee();
+    const curMcap = storage.getElysiumTargetMcap();
+    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided ala Clanker)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
+    const mcapBtn = curMcap > 0 ? `🎯 MCap: $${curMcap >= 1000 ? `${Math.round(curMcap / 1000)}k` : curMcap}` : '🎯 MCap: OFF';
     const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} HYPE</b>` : '🔴 <i>Nonaktif (0 HYPE)</i>';
 
     const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
@@ -3310,6 +3364,7 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 ⚙️ <b>SETTING TRADING &amp; LIQUIDITY:</b>
 • DEX Engine: ${dexBadge}
 • Trading Pair: ${pairBadge}
+• Target Market Cap: ${mcapText}
 • Likuiditas Pool (LP): <b>${curLp} HYPE / Quote</b> (0.0001 - 0.0002)
 • Dev Buy Otomatis: ${devBuyText}
 • Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (% dari total transaksi USD)
@@ -3330,15 +3385,18 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
         Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_elysium_dex_menu')
       ],
       [
+        Markup.button.callback(mcapBtn, 'cmd_elys_mcap_menu'),
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu')
+      ],
+      [
         Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_elysium_fee_menu'),
         Markup.button.callback('🌾 Harvest Fee ke HYPE', 'cmd_elysium_harvest_menu')
       ],
       [
-        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_elysium_lp_menu'),
-        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_elysium_history')
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_elysium_history'),
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_elysium_menu')
       ],
       [
-        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_elysium_menu'),
         Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
@@ -3856,6 +3914,9 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
     const curDevBuy = storage.getBaseDirectDevBuyEth();
     const curPair = storage.getBaseDirectPairToken();
     const curDex = storage.getBaseDirectDexVersion().toUpperCase();
+    const curMcap = storage.getBaseDirectTargetMcap();
+    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided ala Clanker)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
+    const mcapBtn = curMcap > 0 ? `🎯 MCap: $${curMcap >= 1000 ? `${Math.round(curMcap / 1000)}k` : curMcap}` : '🎯 MCap: OFF';
     const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} ETH</b>` : '🔴 <i>Nonaktif (0 ETH)</i>';
 
     const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
@@ -3883,6 +3944,7 @@ Pusat deploy & kelola token mandiri di Base Network dengan Uniswap V4/V3/V2 tanp
 ⚙️ <b>SETTING TRADING & LIQUIDITY:</b>
 • DEX Engine: ${dexBadge}
 • Trading Pair: ${pairBadge}
+• Target Market Cap: ${mcapText}
 • Likuiditas Pool (LP): <b>${curLp} ETH / Quote</b>
 • Dev Buy Otomatis: ${devBuyText}
 • Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
@@ -3901,11 +3963,14 @@ Pusat deploy & kelola token mandiri di Base Network dengan Uniswap V4/V3/V2 tanp
         Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_base_direct_dex_menu')
       ],
       [
-        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_base_direct_lp_menu'),
-        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_base_direct_history')
+        Markup.button.callback(mcapBtn, 'cmd_base_mcap_menu'),
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_base_direct_lp_menu')
       ],
       [
-        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_base_direct_menu'),
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_base_direct_history'),
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_base_direct_menu')
+      ],
+      [
         Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
@@ -4312,6 +4377,9 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
     const curBuyFee = storage.getRobinhoodBuyFee();
     const curSellFee = storage.getRobinhoodSellFee();
     const curV3Fee = storage.getRobinhoodV3FeeTier();
+    const curMcap = storage.getRobinhoodTargetMcap();
+    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided ala Clanker)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
+    const mcapBtn = curMcap > 0 ? `🎯 MCap: $${curMcap >= 1000 ? `${Math.round(curMcap / 1000)}k` : curMcap}` : '🎯 MCap: OFF';
     const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} ETH</b>` : '🔴 <i>Nonaktif (0 ETH)</i>';
 
     const addrDisplay = info.address ? `<code>${info.address}</code>` : '⚠️ Belum dikonfigurasi';
@@ -4340,6 +4408,7 @@ Pusat deploy &amp; kelola token mandiri di <b>Robinhood Chain</b> (konfigurasi l
 • DEX Engine: ${dexBadge}
 • Trading Pair: ${pairBadge}
 • Fee Tier Pool: <b>${curV3Fee / 10000}% (${curV3Fee} bps)</b>
+• Target Market Cap: ${mcapText}
 • Likuiditas Pool (LP): <b>${curLp} ETH / Quote</b>
 • Dev Buy Otomatis: ${devBuyText}
 • Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
@@ -4358,15 +4427,18 @@ Pusat deploy &amp; kelola token mandiri di <b>Robinhood Chain</b> (konfigurasi l
         Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_robinhood_dex_menu')
       ],
       [
-        Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_robinhood_fee_menu'),
+        Markup.button.callback(mcapBtn, 'cmd_rh_mcap_menu'),
         Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_robinhood_lp_menu')
       ],
       [
-        Markup.button.callback('🛠️ Semua Setting', 'cmd_robinhood_settings'),
-        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_robinhood_history')
+        Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_robinhood_fee_menu'),
+        Markup.button.callback('🛠️ Semua Setting', 'cmd_robinhood_settings')
       ],
       [
-        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_robinhood_menu'),
+        Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_robinhood_history'),
+        Markup.button.callback('🔄 Refresh Status & Saldo', 'cmd_robinhood_menu')
+      ],
+      [
         Markup.button.callback('⬅️ Kembali ke Dashboard Utama', 'cmd_start_menu')
       ]
     ]);
@@ -4904,6 +4976,81 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
         await ctx.replyWithHTML(msg, { disable_web_page_preview: true, ...keyboard });
       }
     } catch { await ctx.replyWithHTML(msg, { disable_web_page_preview: true, ...keyboard }); }
+  }
+
+  /**
+   * Shared Target Market Cap configuration menu (Clanker-style single-sided concentrated LP).
+   */
+  async sendTargetMcapMenu(ctx, chain = 'base', isEdit = false) {
+    const meta = {
+      base: {
+        title: 'BASE MANDIRI',
+        cmd: '/basemcap',
+        backCb: 'cmd_base_direct_menu',
+        getMcap: () => storage.getBaseDirectTargetMcap(),
+      },
+      elys: {
+        title: 'ELYSIUM CHAIN',
+        cmd: '/elysmcap',
+        backCb: 'cmd_elysium_menu',
+        getMcap: () => storage.getElysiumTargetMcap(),
+      },
+      rh: {
+        title: 'ROBINHOOD CHAIN',
+        cmd: '/rhmcap',
+        backCb: 'cmd_robinhood_menu',
+        getMcap: () => storage.getRobinhoodTargetMcap(),
+      },
+    }[chain] || {
+      title: 'BASE MANDIRI',
+      cmd: '/basemcap',
+      backCb: 'cmd_base_direct_menu',
+      getMcap: () => storage.getBaseDirectTargetMcap(),
+    };
+
+    const curMcap = meta.getMcap();
+    const check = (val) => (curMcap === val ? '✅ ' : '');
+    const statusLabel = curMcap > 0
+      ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> (Single-Sided LP ala Clanker)`
+      : '🦄 <b>OFF — Mode Full-Range Tradisional</b> (LP ikut saldo ETH/HYPE manual)';
+
+    const msg =
+`🎯 <b>TARGET INITIAL MARKET CAP — ${meta.title}</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Status saat ini: ${statusLabel}
+
+📚 <b>CARA KERJA MARKET CAP ALA CLANKER:</b>
+• Jika Market Cap diatur (misal <b>$35,000</b>), bot memasang <b>Single-Sided Concentrated Liquidity (Uniswap V4/V3)</b> tepat pada <i>starting tick</i> sesuai harga USD target.
+• Modal LP tidak lagi membutuhkan ETH/HYPE senilai puluhan ribu dolar — cukup <b>100% token saja (0 quote di LP)</b>!
+• Saat Dev Buy atau pembeli pertama masuk, quote (ETH/WETH/HYPE/USDC) langsung masuk mengisi pool mulai dari FDV target tersebut.
+
+💬 <b>Custom angka lewat chat:</b>
+Ketik <code>${meta.cmd} 35000</code> (atau <code>${meta.cmd} 50k</code>, <code>${meta.cmd} off</code>)
+
+👇 <i>Pilih preset cepat di bawah:</i>`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`${check(10000)}$10k`, `set_mcap_${chain}_10000`),
+        Markup.button.callback(`${check(27000)}$27k (Clanker)`, `set_mcap_${chain}_27000`),
+        Markup.button.callback(`${check(35000)}$35k ⭐`, `set_mcap_${chain}_35000`),
+      ],
+      [
+        Markup.button.callback(`${check(50000)}$50k`, `set_mcap_${chain}_50000`),
+        Markup.button.callback(`${check(100000)}$100k`, `set_mcap_${chain}_100000`),
+        Markup.button.callback(`${check(0)}OFF (Full Range)`, `set_mcap_${chain}_0`),
+      ],
+      [
+        Markup.button.callback('⬅️ Kembali ke Menu Chain', meta.backCb),
+      ],
+    ]);
+
+    if (isEdit && ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(msg, { parse_mode: 'HTML', ...keyboard });
+      } catch {}
+    }
+    return ctx.replyWithHTML(msg, keyboard);
   }
 }
 

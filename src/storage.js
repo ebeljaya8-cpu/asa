@@ -823,6 +823,48 @@ export class Storage {
     this.saveState(state);
     return { buy, sell };
   }
+
+  // ===== TARGET STARTING MARKET CAP (USD, CLANKER-STYLE SINGLE-SIDED LP) =====
+  // Default: 35000 ($35k FDV). 0 = Full-range ETH/Token LP mode.
+
+  getBaseDirectTargetMcap() {
+    const state = this.getState();
+    return state.baseDirectTargetMcap !== undefined ? Number(state.baseDirectTargetMcap) : (config.baseDirectDefaultTargetMcap ?? 35000);
+  }
+
+  setBaseDirectTargetMcap(mcapUsd) {
+    const val = Math.max(0, parseFloat(mcapUsd) || 0);
+    const state = this.getState();
+    state.baseDirectTargetMcap = val;
+    this.saveState(state);
+    return val;
+  }
+
+  getElysiumTargetMcap() {
+    const state = this.getState();
+    return state.elysiumTargetMcap !== undefined ? Number(state.elysiumTargetMcap) : (config.elysiumDefaultTargetMcap ?? 35000);
+  }
+
+  setElysiumTargetMcap(mcapUsd) {
+    const val = Math.max(0, parseFloat(mcapUsd) || 0);
+    const state = this.getState();
+    state.elysiumTargetMcap = val;
+    this.saveState(state);
+    return val;
+  }
+
+  getRobinhoodTargetMcap() {
+    const state = this.getState();
+    return state.robinhoodTargetMcap !== undefined ? Number(state.robinhoodTargetMcap) : (config.robinhoodDefaultTargetMcap ?? 35000);
+  }
+
+  setRobinhoodTargetMcap(mcapUsd) {
+    const val = Math.max(0, parseFloat(mcapUsd) || 0);
+    const state = this.getState();
+    state.robinhoodTargetMcap = val;
+    this.saveState(state);
+    return val;
+  }
 }
 
 export const storage = new Storage();

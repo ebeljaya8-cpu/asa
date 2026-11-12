@@ -5,6 +5,7 @@ import { ethers } from 'ethers';
 import { config } from '../config.js';
 import { storage } from '../storage.js';
 import { pinataService } from '../pinataService.js';
+import { fetchQuoteUsdPrice, computeClankerMarketCapPosition } from '../utils/marketCapMath.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -428,7 +429,10 @@ export class ElysiumService {
 
     const hypeLp = String(options.hypeLiquidity || storage.getElysiumLpHype() || config.elysiumDefaultLpHype || '0.0001');
     const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0.0001'));
-    const hypeLpWei = ethers.parseEther(hypeLp);
+    const targetMarketCapUsd = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getElysiumTargetMcap());
+    const useSingleSidedMcap = targetMarketCapUsd > 0 && dexVersion !== 'v2';
+
+    const hypeLpWei = useSingleSidedMcap ? 0n : ethers.parseEther(hypeLp);
     const devBuyWei = ethers.parseEther(devBuyHype);
     const gasReserveWei = ethers.parseEther('0.0005'); // Minimal cadangan gas Elysium (~0.1 Gwei)
     const totalRequiredWei = hypeLpWei + devBuyWei + gasReserveWei;
@@ -436,7 +440,7 @@ export class ElysiumService {
     if (balance < totalRequiredWei) {
       const curHype = ethers.formatEther(balance);
       const reqHype = ethers.formatEther(totalRequiredWei);
-      throw new Error(`Saldo HYPE tidak mencukupi! Anda memiliki ${curHype} HYPE, dibutuhkan minimal ${reqHype} HYPE (LP ${hypeLp} HYPE + Dev Buy ${devBuyHype} HYPE + gas).`);
+      throw new Error(`Saldo HYPE tidak mencukupi! Anda memiliki ${curHype} HYPE, dibutuhkan minimal ${reqHype} HYPE (${useSingleSidedMcap ? 'Mode MCap $' + targetMarketCapUsd + ' 0 HYPE LP' : 'LP ' + hypeLp + ' HYPE'} + Dev Buy ${devBuyHype} HYPE + gas).`);
     }
 
     // Resolve Quote Token (HYPE, ETH, WETH, USDC)
@@ -579,76 +583,76 @@ export class ElysiumService {
     let positionTokenId = null;
     let quoteDepositedDisplay = '';
     let initialPrice = 0;
+    let realizedMcapUsd = 0;
 
     if (dexVersion === 'v4') {
-      notify(5, `Menyiapkan likuiditas Uniswap V4 (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%)...`);
+      notify(5, `Menyiapkan likuiditas Uniswap V4 (Pair: ${symbol}/${quoteSymbol}, Fee: ${feeTier / 10000}%${useSingleSidedMcap ? `, Target MCap $${targetMarketCapUsd.toLocaleString()}` : ''})...`);
       const posm = new ethers.Contract(this.v4PositionManager, V4_POSITION_MANAGER_ABI, wallet);
       const permit2 = new ethers.Contract(this.permit2Address, PERMIT2_ABI, wallet);
 
-      let quoteDepositWei = hypeLpWei;
-      let quoteAddressV4 = quoteAddress;
+      let quoteDepositWei = 0n;
+      let quoteAddressV4 = quoteSymbol === 'USDC' ? this.usdcAddress : (quoteSymbol === 'WETH' ? this.wethAddress : ethers.ZeroAddress);
 
-      if (quoteSymbol === 'USDC') {
-        const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
-        let curUsdc = await usdcContract.balanceOf(wallet.address);
+      if (!useSingleSidedMcap) {
+        quoteDepositWei = hypeLpWei;
+        if (quoteSymbol === 'USDC') {
+          const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
+          let curUsdc = await usdcContract.balanceOf(wallet.address);
 
-        // Auto convert small HYPE to USDC via V3 swap if needed
-        if (curUsdc < 1000n) {
-          notify(5, `Menukar ${hypeLp} HYPE ke USDC via Router untuk modal likuiditas pool...`);
+          // Auto convert small HYPE to USDC via V3 swap if needed
+          if (curUsdc < 1000n) {
+            notify(5, `Menukar ${hypeLp} HYPE ke USDC via Router untuk modal likuiditas pool...`);
+            const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
+            const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
+            const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
+            await wrapTx.wait();
+            await (await whypeContract.approve(this.v3SwapRouter, hypeLpWei)).wait();
+
+            const deadline = Math.floor(Date.now() / 1000) + 600;
+            const swapToUsdc = await swapRouter.exactInputSingle({
+              tokenIn: this.wethAddress,
+              tokenOut: this.usdcAddress,
+              fee: 10000,
+              recipient: wallet.address,
+              deadline,
+              amountIn: hypeLpWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await swapToUsdc.wait();
+            curUsdc = await usdcContract.balanceOf(wallet.address);
+            await pace();
+          }
+
+          quoteDepositWei = curUsdc;
+          quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 6)} USDC`;
+          initialPrice = Number(ethers.formatUnits(quoteDepositWei, 6)) / Number(ethers.formatUnits(tokenLp, 18));
+
+          notify(5, `Approve USDC ke Permit2 & PositionManager...`);
+          const appUsdcTx = await usdcContract.approve(this.permit2Address, ethers.MaxUint256);
+          await appUsdcTx.wait();
+          const p2AppUsdc = await permit2.approve(this.usdcAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
+          await p2AppUsdc.wait();
+          await pace();
+        } else if (quoteSymbol === 'WETH') {
+          quoteDepositWei = hypeLpWei;
+          quoteDepositedDisplay = `${hypeLp} WETH`;
+          initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
+
+          notify(5, `Wrap HYPE -> WETH & Approve Permit2...`);
           const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
-          const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
           const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
           await wrapTx.wait();
-          await (await whypeContract.approve(this.v3SwapRouter, hypeLpWei)).wait();
-
-          const deadline = Math.floor(Date.now() / 1000) + 600;
-          const swapToUsdc = await swapRouter.exactInputSingle({
-            tokenIn: this.wethAddress,
-            tokenOut: this.usdcAddress,
-            fee: 10000,
-            recipient: wallet.address,
-            deadline,
-            amountIn: hypeLpWei,
-            amountOutMinimum: 0n,
-            sqrtPriceLimitX96: 0n
-          });
-          await swapToUsdc.wait();
-          curUsdc = await usdcContract.balanceOf(wallet.address);
+          const appWethTx = await whypeContract.approve(this.permit2Address, ethers.MaxUint256);
+          await appWethTx.wait();
+          const p2AppWeth = await permit2.approve(this.wethAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
+          await p2AppWeth.wait();
           await pace();
+        } else {
+          quoteDepositWei = hypeLpWei;
+          quoteDepositedDisplay = `${hypeLp} ${quoteSymbol}`;
+          initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
         }
-
-        quoteDepositWei = curUsdc;
-        quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 6)} USDC`;
-        quoteAddressV4 = this.usdcAddress;
-        initialPrice = Number(ethers.formatUnits(quoteDepositWei, 6)) / Number(ethers.formatUnits(tokenLp, 18));
-
-        notify(5, `Approve USDC ke Permit2 & PositionManager...`);
-        const appUsdcTx = await usdcContract.approve(this.permit2Address, ethers.MaxUint256);
-        await appUsdcTx.wait();
-        const p2AppUsdc = await permit2.approve(this.usdcAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
-        await p2AppUsdc.wait();
-        await pace();
-      } else if (quoteSymbol === 'WETH') {
-        quoteDepositWei = hypeLpWei;
-        quoteDepositedDisplay = `${hypeLp} WETH`;
-        quoteAddressV4 = this.wethAddress;
-        initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
-
-        notify(5, `Wrap HYPE -> WETH & Approve Permit2...`);
-        const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
-        const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
-        await wrapTx.wait();
-        const appWethTx = await whypeContract.approve(this.permit2Address, ethers.MaxUint256);
-        await appWethTx.wait();
-        const p2AppWeth = await permit2.approve(this.wethAddress, this.v4PositionManager, '1461501637330902918203684832716283019655932542975', 281474976710655);
-        await p2AppWeth.wait();
-        await pace();
-      } else {
-        // Native HYPE / ETH (Address 0 in Uniswap V4)
-        quoteDepositWei = hypeLpWei;
-        quoteDepositedDisplay = `${hypeLp} ${quoteSymbol}`;
-        quoteAddressV4 = ethers.ZeroAddress;
-        initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
       }
 
       // Approve Meme Token ke Permit2 & PositionManager
@@ -659,17 +663,53 @@ export class ElysiumService {
       await p2AppToken.wait();
       await pace();
 
-      // Uniswap V4 Token Ordering (currency0 strictly < currency1)
-      const isToken0 = quoteAddressV4 === ethers.ZeroAddress 
-        ? false 
-        : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddressV4.toLowerCase()));
-
-      const currency0 = isToken0 ? tokenAddress : quoteAddressV4;
-      const currency1 = isToken0 ? quoteAddressV4 : tokenAddress;
-      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
-      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
-
       const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
+      let currency0, currency1, amount0Desired, amount1Desired, sqrtPriceX96, tickLower, tickUpper, liquidity;
+
+      if (useSingleSidedMcap) {
+        const quoteUsdPrice = await fetchQuoteUsdPrice(quoteSymbol);
+        const mcapPos = computeClankerMarketCapPosition({
+          targetMarketCapUsd,
+          quoteUsdPrice,
+          totalSupplyWei: totalSupply,
+          tokenDecimals: 18,
+          quoteDecimals,
+          tokenAddress,
+          quoteAddress: quoteAddressV4,
+          tokenLpWei: tokenLp,
+          feeTier
+        });
+        currency0 = mcapPos.currency0;
+        currency1 = mcapPos.currency1;
+        amount0Desired = mcapPos.amount0Desired;
+        amount1Desired = mcapPos.amount1Desired;
+        sqrtPriceX96 = mcapPos.sqrtPriceX96;
+        tickLower = mcapPos.tickLower;
+        tickUpper = mcapPos.tickUpper;
+        liquidity = mcapPos.liquidity;
+        initialPrice = mcapPos.initialPriceQuotePerToken;
+        realizedMcapUsd = Math.round(mcapPos.initialMcapUsd);
+        quoteDepositedDisplay = `0 ${quoteSymbol} (Single-Sided MCap $${realizedMcapUsd.toLocaleString()})`;
+      } else {
+        const isToken0 = quoteAddressV4 === ethers.ZeroAddress
+          ? false
+          : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddressV4.toLowerCase()));
+
+        currency0 = isToken0 ? tokenAddress : quoteAddressV4;
+        currency1 = isToken0 ? quoteAddressV4 : tokenAddress;
+        amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+        amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+        sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+
+        const minTick = -887200;
+        const maxTick = 887200;
+        tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+        tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+        const spA = getSqrtRatioAtTick(tickLower);
+        const spB = getSqrtRatioAtTick(tickUpper);
+        liquidity = getLiquidityForAmounts(sqrtPriceX96, spA, spB, amount0Desired, amount1Desired);
+      }
+
       const poolKey = {
         currency0,
         currency1,
@@ -681,9 +721,6 @@ export class ElysiumService {
       const poolId = computePoolId(poolKey);
       poolAddress = poolId;
 
-      // SqrtPriceX96 Calculation
-      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
-
       notify(5, `Menginisialisasi Pool Uniswap V4 (PoolId: ${poolId.slice(0, 10)}...)...`);
       try {
         const initTx = await posm.initializePool(poolKey, sqrtPriceX96);
@@ -693,15 +730,6 @@ export class ElysiumService {
         // Ignore if already initialized
         console.warn('[ElysiumService] initializePool notice:', initErr.message);
       }
-
-      // Full-Range Tick Calculation
-      const minTick = -887200;
-      const maxTick = 887200;
-      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
-      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
-      const spA = getSqrtRatioAtTick(tickLower);
-      const spB = getSqrtRatioAtTick(tickUpper);
-      const liquidity = getLiquidityForAmounts(sqrtPriceX96, spA, spB, amount0Desired, amount1Desired);
 
       // Actions: MINT_POSITION (0x02), SETTLE_PAIR (0x0d), SWEEP (0x14)
       const actions = '0x020d14';
@@ -737,59 +765,62 @@ export class ElysiumService {
       await pace();
 
     } else if (dexVersion === 'v3') {
-      notify(5, `Menyiapkan likuiditas Uniswap V3 (Pair: ${symbol}/${quoteSymbol}, Fee Tier: ${feeTier / 10000}%)...`);
+      notify(5, `Menyiapkan likuiditas Uniswap V3 (Pair: ${symbol}/${quoteSymbol}, Fee Tier: ${feeTier / 10000}%${useSingleSidedMcap ? `, Target MCap $${targetMarketCapUsd.toLocaleString()}` : ''})...`);
       
       const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
       const npm = new ethers.Contract(this.v3PositionManager, POSITION_MANAGER_ABI, wallet);
       const factory = new ethers.Contract(this.v3Factory, V3_FACTORY_ABI, wallet);
       const swapRouter = new ethers.Contract(this.v3SwapRouter, SWAP_ROUTER_ABI, wallet);
 
-      let quoteDepositWei;
+      let quoteDepositWei = 0n;
+      const pairTokenAddress = quoteSymbol === 'USDC' ? this.usdcAddress : this.wethAddress;
 
-      if (quoteSymbol === 'USDC') {
-        const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
-        let curUsdc = await usdcContract.balanceOf(wallet.address);
+      if (!useSingleSidedMcap) {
+        if (quoteSymbol === 'USDC') {
+          const usdcContract = new ethers.Contract(this.usdcAddress, ERC20_ABI, wallet);
+          let curUsdc = await usdcContract.balanceOf(wallet.address);
 
-        if (curUsdc < 1000n) {
-          notify(5, `Menukar ${hypeLp} HYPE ke USDC via Uniswap V3 Router untuk pasangan pool...`);
+          if (curUsdc < 1000n) {
+            notify(5, `Menukar ${hypeLp} HYPE ke USDC via Uniswap V3 Router untuk pasangan pool...`);
+            const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
+            await wrapTx.wait();
+            const appWhypeTx = await whypeContract.approve(this.v3SwapRouter, hypeLpWei);
+            await appWhypeTx.wait();
+
+            const deadline = Math.floor(Date.now() / 1000) + 600;
+            const swapToUsdc = await swapRouter.exactInputSingle({
+              tokenIn: this.wethAddress,
+              tokenOut: this.usdcAddress,
+              fee: 10000,
+              recipient: wallet.address,
+              deadline,
+              amountIn: hypeLpWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            });
+            await swapToUsdc.wait();
+            curUsdc = await usdcContract.balanceOf(wallet.address);
+            await pace();
+          }
+
+          quoteDepositWei = curUsdc;
+          quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 6)} USDC`;
+          
+          notify(5, `Approve USDC ke NonfungiblePositionManager...`);
+          const appUsdcTx = await usdcContract.approve(this.v3PositionManager, ethers.MaxUint256);
+          await appUsdcTx.wait();
+          initialPrice = Number(ethers.formatUnits(quoteDepositWei, 6)) / Number(ethers.formatUnits(tokenLp, 18));
+        } else {
+          quoteDepositWei = hypeLpWei;
+          quoteDepositedDisplay = `${hypeLp} ${quoteSymbol}`;
+
+          notify(5, `Wrap ${hypeLp} HYPE -> WHYPE & Approve PositionManager...`);
           const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
           await wrapTx.wait();
-          const appWhypeTx = await whypeContract.approve(this.v3SwapRouter, hypeLpWei);
+          const appWhypeTx = await whypeContract.approve(this.v3PositionManager, ethers.MaxUint256);
           await appWhypeTx.wait();
-
-          const deadline = Math.floor(Date.now() / 1000) + 600;
-          const swapToUsdc = await swapRouter.exactInputSingle({
-            tokenIn: this.wethAddress,
-            tokenOut: this.usdcAddress,
-            fee: 10000,
-            recipient: wallet.address,
-            deadline,
-            amountIn: hypeLpWei,
-            amountOutMinimum: 0n,
-            sqrtPriceLimitX96: 0n
-          });
-          await swapToUsdc.wait();
-          curUsdc = await usdcContract.balanceOf(wallet.address);
-          await pace();
+          initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
         }
-
-        quoteDepositWei = curUsdc;
-        quoteDepositedDisplay = `${ethers.formatUnits(quoteDepositWei, 6)} USDC`;
-        
-        notify(5, `Approve USDC ke NonfungiblePositionManager...`);
-        const appUsdcTx = await usdcContract.approve(this.v3PositionManager, ethers.MaxUint256);
-        await appUsdcTx.wait();
-        initialPrice = Number(ethers.formatUnits(quoteDepositWei, 6)) / Number(ethers.formatUnits(tokenLp, 18));
-      } else {
-        quoteDepositWei = hypeLpWei;
-        quoteDepositedDisplay = `${hypeLp} ${quoteSymbol}`;
-
-        notify(5, `Wrap ${hypeLp} HYPE -> WHYPE & Approve PositionManager...`);
-        const wrapTx = await whypeContract.deposit({ value: hypeLpWei });
-        await wrapTx.wait();
-        const appWhypeTx = await whypeContract.approve(this.v3PositionManager, ethers.MaxUint256);
-        await appWhypeTx.wait();
-        initialPrice = Number(hypeLp) / Number(ethers.formatUnits(tokenLp, 18));
       }
 
       notify(5, `Approve ${symbol} ke NonfungiblePositionManager...`);
@@ -797,13 +828,45 @@ export class ElysiumService {
       await appTokenTx.wait();
       await pace();
 
-      const isToken0 = tokenAddress.toLowerCase() < quoteAddress.toLowerCase();
-      const token0 = isToken0 ? tokenAddress : quoteAddress;
-      const token1 = isToken0 ? quoteAddress : tokenAddress;
-      const amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
-      const amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+      const tickSpacing = Number(await factory.feeAmountTickSpacing(feeTier));
+      let token0, token1, amount0Desired, amount1Desired, sqrtPriceX96, tickLower, tickUpper;
 
-      const sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+      if (useSingleSidedMcap) {
+        const quoteUsdPrice = await fetchQuoteUsdPrice(quoteSymbol);
+        const mcapPos = computeClankerMarketCapPosition({
+          targetMarketCapUsd,
+          quoteUsdPrice,
+          totalSupplyWei: totalSupply,
+          tokenDecimals: 18,
+          quoteDecimals,
+          tokenAddress,
+          quoteAddress: pairTokenAddress,
+          tokenLpWei: tokenLp,
+          feeTier
+        });
+        token0 = mcapPos.currency0;
+        token1 = mcapPos.currency1;
+        amount0Desired = mcapPos.amount0Desired;
+        amount1Desired = mcapPos.amount1Desired;
+        sqrtPriceX96 = mcapPos.sqrtPriceX96;
+        tickLower = mcapPos.tickLower;
+        tickUpper = mcapPos.tickUpper;
+        initialPrice = mcapPos.initialPriceQuotePerToken;
+        realizedMcapUsd = Math.round(mcapPos.initialMcapUsd);
+        quoteDepositedDisplay = `0 ${quoteSymbol} (Single-Sided MCap $${realizedMcapUsd.toLocaleString()})`;
+      } else {
+        const isToken0 = tokenAddress.toLowerCase() < pairTokenAddress.toLowerCase();
+        token0 = isToken0 ? tokenAddress : pairTokenAddress;
+        token1 = isToken0 ? pairTokenAddress : tokenAddress;
+        amount0Desired = isToken0 ? tokenLp : quoteDepositWei;
+        amount1Desired = isToken0 ? quoteDepositWei : tokenLp;
+        sqrtPriceX96 = encodePriceSqrt(amount1Desired, amount0Desired);
+
+        const minTick = -887272;
+        const maxTick = 887272;
+        tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
+        tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
+      }
 
       notify(5, `Membuat & menginisialisasi Pool Uniswap V3 (Fee: ${feeTier})...`);
       const initTx = await npm.createAndInitializePoolIfNecessary(token0, token1, feeTier, sqrtPriceX96);
@@ -812,13 +875,7 @@ export class ElysiumService {
 
       poolAddress = await factory.getPool(token0, token1, feeTier);
 
-      const tickSpacing = Number(await factory.feeAmountTickSpacing(feeTier));
-      const minTick = -887272;
-      const maxTick = 887272;
-      const tickLower = Math.ceil(minTick / tickSpacing) * tickSpacing;
-      const tickUpper = Math.floor(maxTick / tickSpacing) * tickSpacing;
-
-      notify(5, `Menyetor likuiditas penuh (Full-Range Mint) ke Uniswap V3...`);
+      notify(5, `Menyetor likuiditas ke Uniswap V3...`);
       const deadline = Math.floor(Date.now() / 1000) + 1200;
       const mintTx = await npm.mint({
         token0,
@@ -903,16 +960,32 @@ export class ElysiumService {
     // Step 7: Dev Buy
     let devBuyTxHash = '';
     if (devBuyWei > 0n) {
-      if (dexVersion === 'v4') {
-        notify(8, `Menjalankan Dev Buy sebesar ${devBuyHype} HYPE via Uniswap V4 (UniversalRouter)...`);
+      if (dexVersion === 'v4' && (quoteSymbol === 'HYPE' || quoteSymbol === 'ETH' || quoteSymbol === 'WETH')) {
+        notify(8, `Menjalankan Dev Buy sebesar ${devBuyHype} ${quoteSymbol} via Uniswap V4 (UniversalRouter)...`);
         try {
           const ur = new ethers.Contract(this.universalRouter, UNIVERSAL_ROUTER_ABI, wallet);
           const deadline = Math.floor(Date.now() / 1000) + 600;
+          const quoteAddrV4 = quoteSymbol === 'WETH' ? this.wethAddress : ethers.ZeroAddress;
+
+          if (quoteSymbol === 'WETH') {
+            const whypeContract = new ethers.Contract(this.wethAddress, ERC20_ABI, wallet);
+            const permit2 = new ethers.Contract(this.permit2Address, PERMIT2_ABI, wallet);
+            await (await whypeContract.deposit({ value: devBuyWei })).wait();
+            await (await whypeContract.approve(this.permit2Address, ethers.MaxUint256)).wait();
+            await (await permit2.approve(this.wethAddress, this.universalRouter, '1461501637330902918203684832716283019655932542975', 281474976710655)).wait();
+          }
+
+          const isToken0 = quoteAddrV4 === ethers.ZeroAddress
+            ? false
+            : (BigInt(tokenAddress.toLowerCase()) < BigInt(quoteAddrV4.toLowerCase()));
+          const currency0 = isToken0 ? tokenAddress : quoteAddrV4;
+          const currency1 = isToken0 ? quoteAddrV4 : tokenAddress;
+          const zeroForOne = !isToken0;
 
           const tickSpacing = feeTier >= 10000 ? 200 : (feeTier >= 3000 ? 60 : 10);
           const poolKey = {
-            currency0: ethers.ZeroAddress,
-            currency1: tokenAddress,
+            currency0,
+            currency1,
             fee: feeTier,
             tickSpacing,
             hooks: ethers.ZeroAddress
@@ -923,20 +996,20 @@ export class ElysiumService {
             [EXACT_INPUT_SINGLE_TYPE],
             [{
               poolKey,
-              zeroForOne: true,
+              zeroForOne,
               amountIn: devBuyWei,
               amountOutMinimum: 0n,
               hookData: '0x'
             }]
           );
-          const p1 = abiCoder.encode(['address', 'uint256', 'bool'], [ethers.ZeroAddress, devBuyWei, false]);
+          const p1 = abiCoder.encode(['address', 'uint256', 'bool'], [quoteAddrV4, devBuyWei, quoteSymbol === 'WETH']);
           const p2 = abiCoder.encode(['address', 'address', 'uint256'], [tokenAddress, wallet.address, 0n]);
 
           const v4Input = abiCoder.encode(['bytes', 'bytes[]'], ['0x060b0e', [p0, p1, p2]]);
-          const buyTx = await ur.execute('0x10', [v4Input], deadline, { value: devBuyWei });
+          const buyTx = await ur.execute('0x10', [v4Input], deadline, { value: quoteSymbol === 'WETH' ? 0n : devBuyWei });
           await buyTx.wait();
           devBuyTxHash = buyTx.hash;
-          notify(8, `Dev Buy Uniswap V4 sebesar ${devBuyHype} HYPE berhasil dieksekusi! Tx: ${devBuyTxHash}`);
+          notify(8, `Dev Buy Uniswap V4 sebesar ${devBuyHype} ${quoteSymbol} berhasil dieksekusi! Tx: ${devBuyTxHash}`);
           await pace();
         } catch (buyErr) {
           console.warn('Dev Buy V4 warning:', buyErr.message);
@@ -1071,7 +1144,8 @@ export class ElysiumService {
       dexVersion: dexName,
       pairToken: quoteSymbol,
       quoteDeposited: quoteDepositedDisplay,
-      hypeDeposited: hypeLp,
+      hypeDeposited: useSingleSidedMcap ? '0' : hypeLp,
+      targetMarketCapUsd: useSingleSidedMcap ? (realizedMcapUsd || targetMarketCapUsd) : 0,
       devBuyHype: devBuyHype,
       tokenDeposited: ethers.formatUnits(tokenLp, 18),
       initialPriceHype: initialPrice,
@@ -1126,6 +1200,7 @@ export class ElysiumService {
         tokensDeposited: `${ethers.formatUnits(tokenLp, 18)} ${symbol}`,
         initialPrice,
         initialPriceHype: initialPrice,
+        targetMarketCapUsd: useSingleSidedMcap ? (realizedMcapUsd || targetMarketCapUsd) : 0,
         addLiquidityTxHash,
         setPairTxHash,
         enableTradingTxHash,
