@@ -1339,9 +1339,10 @@ export class ElysiumService {
     const definedUrl = `https://un.defined.fi/elysium/${poolId || tokenAddress}`;
     const geckoUrl = `https://www.geckoterminal.com/elysium/pools/${poolId || tokenAddress}`;
 
-    const record = storage.saveElysiumToken({
+    const record = storage.saveElysiumDeployedToken({
       name,
       symbol,
+      tokenAddress,
       address: tokenAddress,
       launchType: 'montra',
       poolId: poolId || '',

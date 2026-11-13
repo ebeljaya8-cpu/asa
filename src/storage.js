@@ -158,8 +158,9 @@ export class Storage {
       symbol: record.symbol,
       imageUrl: record.imageUrl || 'https://assets.coingecko.com/coins/images/placeholder.png',
       totalSupply: record.totalSupply || '100000000000',
-      tokenAddress: record.tokenAddress,
-      poolAddress: record.poolAddress,
+      tokenAddress: record.tokenAddress || record.address,
+      poolAddress: record.poolAddress || record.poolId || '',
+      launchType: record.launchType || 'direct',
       lockAddress: record.lockAddress || '',
       deployerAddress: record.deployerAddress,
       feeWallet: record.feeWallet || record.deployerAddress,
@@ -197,6 +198,10 @@ export class Storage {
     state.totalElysiumDeployedCount = (state.totalElysiumDeployedCount || 0) + 1;
     this.saveState(state);
     return entry;
+  }
+
+  saveElysiumToken(record) {
+    return this.saveElysiumDeployedToken(record);
   }
 
   getBaseDirectDeployedTokens() {
