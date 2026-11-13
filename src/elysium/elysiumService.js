@@ -82,6 +82,12 @@ const FACTORY_ABI = [
   'function createPair(address tokenA, address tokenB) external returns (address pair)'
 ];
 
+// Official Montra Launchpad (Elysium Uniswap V4 Hook Bonding Curve)
+const MONTRA_FACTORY_ABI = [
+  'function launch((string name, string symbol, string uri, (string imageUri, string description, (string twitter, string telegram, string website, string extra1, string extra2) socials) metadata, uint256 feeOption, uint256 totalSupply, bytes32 salt, address[] partners, uint16[] partnerBps, uint256 devBuyHype, uint256 minAmountOut, (uint256 deadline, uint8 v, bytes32 r, bytes32 s) permit)) payable returns (address token, bytes32 poolId)',
+  'event TokenCreated(address indexed token, address indexed creator, bytes32 poolId, string name, string symbol, uint256 totalSupply)'
+];
+
 // Math & Utility Constants
 const Q96 = 2n ** 96n;
 const POOL_KEY_TYPE = 'tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)';
@@ -238,6 +244,11 @@ export class ElysiumService {
 
     // Uniswap V2 Router (Fallback)
     this.routerAddress = config.elysiumRouter || '0x3320b5685c1c4a0d2a5b0ca30dcee095142bf076';
+
+    // Official Montra Launchpad (Elysium Uniswap V4 Hook Bonding Curve)
+    this.montraFactory = config.elysiumMontraFactory || '0x38D3ef3A06D18fA3286Fb5dEAfe611be725fcD15';
+    this.montraHook = config.elysiumMontraHook || '0x6b1216A40B65c83e9c9e18a562C446697B8cf8EC';
+    this.montraRouter = config.elysiumMontraRouter || '0xc6E9a8E1a99023B67067B8A3605403b8d7B3A157';
   }
 
   getDeployerWallet() {
@@ -408,6 +419,11 @@ export class ElysiumService {
   }
 
   async deployToken(options = {}, onProgress = null) {
+    const activeMode = (options.mode || storage.getElysiumDeployMode() || 'direct').toLowerCase();
+    if (activeMode === 'montra' && options.mode !== 'direct') {
+      return this.deployViaMontra(options, onProgress);
+    }
+
     const notify = (step, msg) => {
       console.log(`[ElysiumDeploy] Step ${step}: ${msg}`);
       if (typeof onProgress === 'function') {
@@ -1210,6 +1226,173 @@ export class ElysiumService {
         tokenExplorer: `${this.explorerUrl}/address/${tokenAddress}`,
         poolExplorer: poolExplorerUrl,
         dexscreener: dexscreenerUrl
+      },
+      record
+    };
+  }
+
+  async deployViaMontra(options = {}, onProgress = null) {
+    const notify = (step, msg) => {
+      console.log(`[MontraDeploy] Step ${step}: ${msg}`);
+      if (typeof onProgress === 'function') {
+        try { onProgress(step, msg); } catch {}
+      }
+    };
+
+    const wallet = this.getDeployerWallet();
+    if (!wallet) {
+      throw new Error('Private key deployer Elysium belum dikonfigurasi di .env (ELYSIUM_PRIVATE_KEY / PRIVATE_KEY)');
+    }
+
+    notify(1, 'Memeriksa saldo HYPE dan kesiapan Official Montra Launchpad (Elysium)...');
+    const balance = await this.provider.getBalance(wallet.address);
+
+    const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0'));
+    const devBuyWei = ethers.parseEther(devBuyHype);
+    const gasReserveWei = ethers.parseEther('0.0005');
+    const totalRequiredWei = devBuyWei + gasReserveWei;
+
+    if (balance < totalRequiredWei) {
+      const curHype = ethers.formatEther(balance);
+      const reqHype = ethers.formatEther(totalRequiredWei);
+      throw new Error(`Saldo HYPE tidak mencukupi untuk launch via Montra! Anda memiliki ${curHype} HYPE, dibutuhkan minimal ${reqHype} HYPE (Dev Buy ${devBuyHype} HYPE + gas).`);
+    }
+
+    notify(2, 'Menyiapkan metadata dan media token untuk Official Factory...');
+    const name = (options.name || 'AI Meme Coin').trim();
+    const symbol = (options.symbol || 'AIMEME').toUpperCase().trim();
+    const description = options.description || `${name} ($${symbol}) launched on Elysium via Montra Official Launchpad`;
+    const imageUrl = options.imageUrl || '';
+    const tokenUri = options.tokenUri || imageUrl || '';
+
+    const salt = ethers.hexlify(ethers.randomBytes(32));
+    const totalSupply = ethers.parseUnits('1000000000', 18); // 1 Miliar Token
+
+    const launchParams = {
+      name,
+      symbol,
+      uri: tokenUri,
+      metadata: {
+        imageUri: imageUrl,
+        description,
+        socials: {
+          twitter: options.twitter || '',
+          telegram: options.telegram || '',
+          website: options.website || '',
+          extra1: '',
+          extra2: ''
+        }
+      },
+      feeOption: 1n,
+      totalSupply,
+      salt,
+      partners: [],
+      partnerBps: [],
+      devBuyHype: devBuyWei,
+      minAmountOut: 0n,
+      permit: {
+        deadline: 0n,
+        v: 0,
+        r: ethers.ZeroHash,
+        s: ethers.ZeroHash
+      }
+    };
+
+    notify(3, 'Mengirim transaksi launch ke Montra Factory (Uniswap V4 Hook Bonding Curve)...');
+    const montraContract = new ethers.Contract(this.montraFactory, MONTRA_FACTORY_ABI, wallet);
+
+    const tx = await montraContract.launch(launchParams, {
+      value: devBuyWei,
+      gasLimit: 2500000
+    });
+
+    notify(4, `Transaksi terkirim: ${tx.hash.slice(0, 10)}... Menunggu konfirmasi on-chain...`);
+    const receipt = await tx.wait();
+
+    let tokenAddress = null;
+    let poolId = null;
+    const factoryAddrLower = this.montraFactory.toLowerCase();
+
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() === factoryAddrLower && log.topics.length >= 4) {
+        tokenAddress = ethers.getAddress(ethers.dataSlice(log.topics[1], 12));
+        poolId = log.topics[3];
+        break;
+      }
+    }
+
+    if (!tokenAddress) {
+      try {
+        const staticRes = await montraContract.launch.staticCall(launchParams, { value: devBuyWei });
+        tokenAddress = staticRes[0];
+        poolId = staticRes[1];
+      } catch {}
+    }
+
+    if (!tokenAddress) {
+      throw new Error(`Gagal mendeteksi alamat token dari event Montra Factory pada tx ${tx.hash}`);
+    }
+
+    notify(5, `Token berhasil dibuat: ${tokenAddress}. Pool V4 Hook terdaftar di Defined.fi!`);
+
+    const poolExplorerUrl = `${this.explorerUrl}/address/${this.v4PoolManager}`;
+    const definedUrl = `https://un.defined.fi/elysium/${poolId || tokenAddress}`;
+    const geckoUrl = `https://www.geckoterminal.com/elysium/pools/${poolId || tokenAddress}`;
+
+    const record = storage.saveElysiumToken({
+      name,
+      symbol,
+      address: tokenAddress,
+      launchType: 'montra',
+      poolId: poolId || '',
+      poolAddress: poolId || this.v4PoolManager,
+      deployerAddress: wallet.address,
+      feeWallet: wallet.address,
+      buyFee: 0,
+      sellFee: 0,
+      dexVersion: 'Official Montra (Uniswap V4 Hook)',
+      pairToken: 'HYPE',
+      quoteDeposited: '0 HYPE (Virtual Bonding Curve $2,114)',
+      hypeDeposited: '0',
+      targetMarketCapUsd: 1057,
+      devBuyHype: devBuyHype,
+      tokenDeposited: '1000000000',
+      initialPriceHype: '0.000000042',
+      deployTx: tx.hash,
+      isVerified: true
+    });
+
+    return {
+      success: true,
+      launchType: 'montra',
+      dexVersion: 'Official Montra (Uniswap V4 Hook)',
+      pairToken: 'HYPE',
+      token: {
+        name,
+        symbol,
+        address: tokenAddress,
+        imageUrl,
+        totalSupply: '1,000,000,000',
+        deployTxHash: tx.hash,
+        isVerified: true
+      },
+      liquidity: {
+        dexName: 'Official Montra (Uniswap V4 Hook)',
+        poolAddress: poolId || tokenAddress,
+        quoteToken: 'HYPE',
+        quoteDeposited: '0 HYPE (Virtual Bonding Curve $2,114)',
+        virtualLiquidityUsd: 2114,
+        targetMarketCapUsd: 1057,
+        devBuyHype: `${devBuyHype} HYPE`,
+        tokensDeposited: `1,000,000,000 ${symbol}`,
+        deployTxHash: tx.hash
+      },
+      urls: {
+        tokenExplorer: `${this.explorerUrl}/address/${tokenAddress}`,
+        poolExplorer: poolExplorerUrl,
+        defined: definedUrl,
+        dexscreener: definedUrl,
+        geckoterminal: geckoUrl
       },
       record
     };

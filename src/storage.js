@@ -865,6 +865,32 @@ export class Storage {
     this.saveState(state);
     return val;
   }
+
+  getElysiumDeployMode() {
+    const state = this.getState();
+    return state.elysiumDeployMode || 'direct'; // 'direct' (Mandiri Virtual Liq) | 'montra' (Official Launchpad)
+  }
+
+  setElysiumDeployMode(mode) {
+    const valid = mode === 'montra' ? 'montra' : 'direct';
+    const state = this.getState();
+    state.elysiumDeployMode = valid;
+    this.saveState(state);
+    return valid;
+  }
+
+  getRobinhoodDeployMode() {
+    const state = this.getState();
+    return state.robinhoodDeployMode || 'direct'; // 'direct' (Mandiri Virtual Liq) | 'pons' (Official Launchpad)
+  }
+
+  setRobinhoodDeployMode(mode) {
+    const valid = mode === 'pons' ? 'pons' : 'direct';
+    const state = this.getState();
+    state.robinhoodDeployMode = valid;
+    this.saveState(state);
+    return valid;
+  }
 }
 
 export const storage = new Storage();

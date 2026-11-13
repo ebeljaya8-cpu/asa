@@ -1339,6 +1339,21 @@ export class TelegramBotApp {
       });
     });
 
+    bot.action('cmd_ai_deploy_montra', async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await this.executeDeployMontra(ctx, {
+        name: t.name,
+        symbol: t.symbol,
+        imageUrl: t.imageUrl,
+        description: t.description || `${t.name} ($${t.symbol}) launched via Montra`,
+        devBuyHype: storage.getElysiumDevBuyHype() || '0'
+      });
+    });
+
     bot.action('cmd_ai_deploy_robinhood', async (ctx) => {
       await ctx.answerCbQuery().catch(() => {});
       if (!this.latestAIToken) {
@@ -1596,6 +1611,45 @@ export class TelegramBotApp {
         sniperBuyFee: 80,
         sniperWindowMinutes: 30,
         lockAmount: 0n
+      });
+    });
+
+    bot.action(/^d_montra_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy via Official Montra...').catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      let targetToken = this.trendingCache ? this.trendingCache[idx] : null;
+
+      if (!targetToken) {
+        return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending lagi.');
+      }
+
+      await this.executeDeployMontra(ctx, {
+        name: targetToken.name,
+        symbol: targetToken.symbol,
+        imageUrl: targetToken.imageUrl,
+        devBuyHype: storage.getElysiumDevBuyHype() || '0'
+      });
+    });
+
+    bot.action('cmd_elys_mode_toggle', async (ctx) => {
+      const current = storage.getElysiumDeployMode();
+      const next = current === 'montra' ? 'direct' : 'montra';
+      storage.setElysiumDeployMode(next);
+      const text = next === 'montra'
+        ? '🔥 Mode: Official Montra (Uniswap V4 Hook, Instant Defined.fi & Sniper Bot!)'
+        : '⚡ Mode: Mandiri (Custom Tax 5% Buy/Sell + 80% Anti-Sniper + Virtual Liquidity Bonding Curve!)';
+      await ctx.answerCbQuery(text, { show_alert: true }).catch(() => {});
+      await this.sendElysiumMenu(ctx, true);
+    });
+
+    bot.action('cmd_elysium_montra_quick_demo', async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan Quick Deploy Montra...').catch(() => {});
+      const randomTag = Math.floor(100 + Math.random() * 900);
+      await this.executeDeployMontra(ctx, {
+        name: `Montra Gem ${randomTag}`,
+        symbol: `MGEM${randomTag}`,
+        imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
+        devBuyHype: storage.getElysiumDevBuyHype() || '0'
       });
     });
 
@@ -2616,10 +2670,14 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
             Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
           ]);
           buttons.push([
-            Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`)
+            Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`),
+            Markup.button.callback(`🔥 Montra (Elysium)`, `d_montra_${index}`)
           ]);
         } else if (category === 'elysium' || category === 'elys' || srcNet === 'elysium') {
-          buttons.push([Markup.button.callback(`🪐 Deploy ke Elysium Mainnet`, `d_elys_${index}`)]);
+          buttons.push([
+            Markup.button.callback(`🪐 Deploy Elysium (Mandiri)`, `d_elys_${index}`),
+            Markup.button.callback(`🔥 Deploy Montra (Elysium)`, `d_montra_${index}`)
+          ]);
           buttons.push([
             Markup.button.callback(`⚡ Deploy Mandiri (Base)`, `d_basedir_${index}`),
             Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
@@ -2634,6 +2692,9 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
           ]);
           buttons.push([
             Markup.button.callback(`🪐 Deploy ke Elysium`, `d_elys_${index}`),
+            Markup.button.callback(`🔥 Montra (Elysium)`, `d_montra_${index}`)
+          ]);
+          buttons.push([
             Markup.button.callback(`🏹 Deploy ke Robinhood`, `d_rh_${index}`)
           ]);
         }
@@ -3223,11 +3284,14 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
 
       const keyboard = Markup.inlineKeyboard([
         [
-          Markup.button.callback(`🪐 Deploy ke Elysium`, 'cmd_ai_deploy_elysium'),
-          Markup.button.callback(`🏹 Deploy ke Robinhood`, 'cmd_ai_deploy_robinhood')
+          Markup.button.callback(`🪐 Deploy Elysium (Mandiri)`, 'cmd_ai_deploy_elysium'),
+          Markup.button.callback(`🔥 Montra (Elysium)`, 'cmd_ai_deploy_montra')
         ],
         [
-          Markup.button.callback(`🔵 Deploy ke Base Mandiri (Uniswap V4)`, 'cmd_ai_deploy_base'),
+          Markup.button.callback(`🏹 Deploy ke Robinhood`, 'cmd_ai_deploy_robinhood'),
+          Markup.button.callback(`🔵 Deploy Base Mandiri`, 'cmd_ai_deploy_base')
+        ],
+        [
           Markup.button.callback(`🚀 Deploy via Clanker (Base)`, 'cmd_ai_deploy_clanker')
         ],
         [
@@ -3335,7 +3399,14 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
     const curBuyFee = storage.getElysiumBuyFee();
     const curSellFee = storage.getElysiumSellFee();
     const curMcap = storage.getElysiumTargetMcap();
-    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided ala Clanker)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
+    const curMode = storage.getElysiumDeployMode();
+    const modeBadge = curMode === 'montra'
+      ? '🔥 <b>Official Montra Factory (Defined.fi Instant & Snipers Ready ⚡)</b>'
+      : '⚡ <b>Mandiri Uniswap V4 (Tax 5% + Anti-Sniper 80% + Virtual Liq)</b>';
+    const modeBtn = curMode === 'montra'
+      ? '🚀 Mode: Official Montra (Defined.fi)'
+      : '🚀 Mode: Mandiri (Tax 5% + AntiSniper)';
+    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided Virtual Liq)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
     const mcapBtn = curMcap > 0 ? `🎯 MCap: $${curMcap >= 1000 ? `${Math.round(curMcap / 1000)}k` : curMcap}` : '🎯 MCap: OFF';
     const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} HYPE</b>` : '🔴 <i>Nonaktif (0 HYPE)</i>';
 
@@ -3357,15 +3428,16 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 • Saldo Gas (HYPE): ${balanceHypeDisplay}
 • Saldo USDC: ${balanceUsdcDisplay}
 • Estimasi Gas: ${gasDisplay}
+• Montra Factory: <code>0x38D3ef3A...</code> (Official Launchpad)
 • PoolManager V4: <code>${info.v4PoolManager || '0xE2e1...'}</code>
-• Position Manager V4: <code>${info.v4PositionManager || '0x1d1C...'}</code>
 • Universal Router: <code>${info.universalRouter || '0xA13f...'}</code>
 
 ⚙️ <b>SETTING TRADING &amp; LIQUIDITY:</b>
+• Mode Deploy Aktif: ${modeBadge}
 • DEX Engine: ${dexBadge}
 • Trading Pair: ${pairBadge}
 • Target Market Cap: ${mcapText}
-• Likuiditas Pool (LP): <b>${curLp} HYPE / Quote</b> (0.0001 - 0.0002)
+• Likuiditas Pool (LP): <b>${curLp} HYPE / Quote</b> (Single-Sided Virtual Liq ~$12.9k+)
 • Dev Buy Otomatis: ${devBuyText}
 • Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (% dari total transaksi USD)
 • Penerimaan Fee: <b>⚡ Koin HYPE Asli</b> (Auto Swap-Back ke HYPE)
@@ -3376,6 +3448,9 @@ Selamat datang di pusat deploy &amp; monitoring Elysium Mainnet (HyperEVM L2)!
 👇 <i>Pilih aksi di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(modeBtn, 'cmd_elys_mode_toggle')
+      ],
       [
         Markup.button.callback('🚀 Deploy Token Baru ke Elysium', 'cmd_elysium_deploy_menu'),
         Markup.button.callback('🔥 Trending Elysium DEX', 'cmd_trending_elysium')
@@ -3721,10 +3796,11 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback(`💎 Deploy WELYSIUM (${curPair}, LP ${curLp})`, 'cmd_elysium_deploy_welysium')
+        Markup.button.callback(`🔥 Deploy via Official Montra (Defined.fi ⚡)`, 'cmd_elysium_montra_quick_demo')
       ],
       [
-        Markup.button.callback(`⚡ Quick Deploy Token Demo (${curPair})`, 'cmd_elysium_quick_demo')
+        Markup.button.callback(`⚡ Quick Deploy Mandiri (${curPair}, Tax 5%)`, 'cmd_elysium_quick_demo'),
+        Markup.button.callback(`💎 Deploy WELYSIUM`, 'cmd_elysium_deploy_welysium')
       ],
       [
         Markup.button.callback(`🏷️ Fee: ${curBuyFee}% B / ${curSellFee}% S`, 'cmd_elysium_fee_menu'),
@@ -3779,6 +3855,11 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
   }
 
   async executeDeployElysium(ctx, options = {}) {
+    const activeMode = (options.mode || storage.getElysiumDeployMode() || 'direct').toLowerCase();
+    if (activeMode === 'montra' && options.mode !== 'direct') {
+      return this.executeDeployMontra(ctx, options);
+    }
+
     const hypeLp = String(options.hypeLiquidity || storage.getElysiumLpHype() || '0.0001');
     const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0.0001'));
     const pairChoice = options.pair || storage.getElysiumPairToken() || 'HYPE';
@@ -3786,6 +3867,10 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
     const dexName = dexVersion.toLowerCase() === 'v4' ? 'Uniswap V4' : (dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2');
     const curBuyFee = Number(options.buyFee !== undefined ? options.buyFee : storage.getElysiumBuyFee());
     const curSellFee = Number(options.sellFee !== undefined ? options.sellFee : storage.getElysiumSellFee());
+    const curMcap = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getElysiumTargetMcap());
+    const liqInfo = curMcap > 0 && dexVersion !== 'v2'
+      ? `<b>Virtual Bonding Curve ($${curMcap.toLocaleString()} FDV - 0 HYPE LP)</b>`
+      : `<b>${hypeLp} HYPE / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>`;
 
     const initialMsg = await ctx.replyWithHTML(
       `🪐 <b>MEMULAI DEPLOYMENT KE ELYSIUM MAINNET (CHAIN ID 99901)</b>\n` +
@@ -3794,7 +3879,7 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
       `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
       `• DEX Engine: <b>${dexName}</b>\n` +
       `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
-      `• Likuiditas Pool: <b>${hypeLp} HYPE / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
+      `• Mode Likuiditas: ${liqInfo}\n` +
       `• Dev Buy Otomatis: <b>${Number(devBuyHype) > 0 ? `${devBuyHype} HYPE` : 'Nonaktif'}</b>\n` +
       `• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b> (dari total transaksi USD)\n` +
       `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
@@ -3826,7 +3911,8 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Elysium</b> (Chain ID 99901)
         hypeLiquidity: hypeLp,
         devBuyHype,
         buyFee: curBuyFee,
-        sellFee: curSellFee
+        sellFee: curSellFee,
+        targetMarketCapUsd: curMcap
       };
       const result = await elysiumService.deployToken(deployOptions, progressUpdates);
 
@@ -3903,6 +3989,105 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
           [Markup.button.callback('🪐 Dashboard Elysium', 'cmd_elysium_menu')]
         ])
       );
+    }
+  }
+
+  async executeDeployMontra(ctx, options = {}) {
+    const devBuyHype = String(options.devBuyHype !== undefined ? options.devBuyHype : (storage.getElysiumDevBuyHype() !== undefined ? storage.getElysiumDevBuyHype() : '0'));
+
+    const initialMsg = await ctx.replyWithHTML(
+      `🔥 <b>MEMULAI DEPLOYMENT OFFICIAL MONTRA LAUNCHPAD (ELYSIUM)</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+      `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
+      `• Engine: <b>Official Montra Factory (Uniswap V4 Hook Bonding Curve)</b>\n` +
+      `• Likuiditas Virtual: <b>~$2,114 USD (0 HYPE Modal LP)</b>\n` +
+      `• Total Supply: <b>1.000.000.000 (1B)</b>\n` +
+      `• Dev Buy Otomatis: <b>${Number(devBuyHype) > 0 ? `${devBuyHype} HYPE` : '0 HYPE (Hanya bayar gas ~0.0005 HYPE)'}</b>\n` +
+      `• Indexer: <b>Terindex Instan di Defined.fi & Snipers Ready ⚡</b>\n\n` +
+      `⏳ <i>Langkah 1/5: Memeriksa saldo HYPE & kesiapan parameter Montra Factory...</i>`
+    );
+
+    const progressUpdates = async (step, msg) => {
+      try {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          initialMsg.message_id,
+          null,
+          `🔥 <b>DEPLOYMENT OFFICIAL MONTRA (ELYSIUM MAINNET)</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• Token: <b>${escapeHtml(options.name)}</b> (<code>$${escapeHtml(options.symbol)}</code>)\n` +
+          `• Status: <b>Langkah ${step}/5</b>\n\n` +
+          `⏳ <i>${escapeHtml(msg)}</i>`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+    };
+
+    try {
+      const deployOptions = {
+        ...options,
+        devBuyHype
+      };
+      const result = await elysiumService.deployViaMontra(deployOptions, progressUpdates);
+
+      const summaryMsg = 
+`🎉 <b>TOKEN BERHASIL DIDEPLOY VIA OFFICIAL MONTRA!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Info Token:</b>
+• Nama: <b>${escapeHtml(result.token.name)}</b>
+• Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
+• Kontrak Token: <code>${result.token.address}</code>
+• Total Supply: <b>1.000.000.000 (1B)</b>
+• Platform: <b>Official Montra Launchpad (Elysium)</b>
+
+💧 <b>Uniswap V4 Hook Bonding Curve:</b>
+• Pool ID: <code>${result.liquidity.poolAddress}</code>
+• Likuiditas Virtual: <b>$2.114 USD (0 HYPE LP Diperlukan)</b>
+• Dev Buy Awal: <b>${result.liquidity.devBuyHype}</b>
+• Starting FDV: <b>~$1.057 USD</b>
+
+⚡ <b>Keunggulan Mode Montra:</b>
+• <b>Terindex Instan di Defined.fi</b> tanpa delay
+• <b>Sniper Bot langsung menembak</b> pool Uniswap V4 Hook
+• <b>Modal Super Hemat:</b> 0 HYPE untuk LP, hanya bayar gas (~$0.01)
+
+🔗 <b>Akses Cepat & Chart:</b>
+• <a href="${result.urls.tokenExplorer}">Lihat di Explorer Elysium</a>
+• <a href="${result.urls.defined}">Pantau Chart di Defined.fi</a>
+• <a href="${result.urls.geckoterminal}">Pantau di GeckoTerminal</a>`;
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        initialMsg.message_id,
+        null,
+        summaryMsg,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.url('📈 Chart Defined.fi', result.urls.defined),
+              Markup.button.url('🦎 GeckoTerminal', result.urls.geckoterminal)
+            ],
+            [
+              Markup.button.url('🔍 Elysium Explorer', result.urls.tokenExplorer)
+            ]
+          ])
+        }
+      );
+    } catch (err) {
+      console.error('[MontraDeploy] Error:', err);
+      try {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          initialMsg.message_id,
+          null,
+          `❌ <b>DEPLOYMENT MONTRA GAGAL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n• Error: <code>${escapeHtml(err.message)}</code>`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {
+        await ctx.reply(`❌ Deployment Montra gagal: ${err.message}`);
+      }
     }
   }
 
@@ -4219,6 +4404,10 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
     const pairChoice = options.pair || storage.getBaseDirectPairToken() || 'ETH';
     const dexVersion = options.dexVersion || storage.getBaseDirectDexVersion() || 'v4';
     const dexName = dexVersion.toLowerCase() === 'v4' ? 'Uniswap V4' : (dexVersion.toLowerCase() === 'v3' ? 'Uniswap V3' : 'Uniswap V2');
+    const curMcap = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getBaseDirectTargetMcap());
+    const liqInfo = curMcap > 0 && dexVersion !== 'v2'
+      ? `<b>Virtual Bonding Curve ($${curMcap.toLocaleString()} FDV - 0 ETH LP)</b>`
+      : `<b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>`;
 
     const initialMsg = await ctx.replyWithHTML(
       `⚡ <b>MEMULAI DEPLOYMENT MANDIRI KE BASE MAINNET (CHAIN ID 8453)</b>\n` +
@@ -4227,7 +4416,7 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
       `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
       `• DEX Engine: <b>${dexName}</b>\n` +
       `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
-      `• Likuiditas Pool: <b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(options.symbol)}</b>\n` +
+      `• Mode Likuiditas: ${liqInfo}\n` +
       `• Dev Buy Otomatis: <b>${Number(devBuyEth) > 0 ? `${devBuyEth} ETH` : 'Nonaktif'}</b>\n` +
       `• Fee: <b>${options.buyFee || 5}% Buy / ${options.sellFee || 5}% Sell</b>\n` +
       `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
@@ -4257,7 +4446,8 @@ Atur jumlah native gas <b>ETH / Quote</b> yang disetor ke Pool Uniswap ${curDex}
         pair: pairChoice,
         dexVersion,
         ethLiquidity: ethLp,
-        devBuyEth
+        devBuyEth,
+        targetMarketCapUsd: curMcap
       };
       const result = await baseDeployService.deployToken(deployOptions, progressUpdates);
 
@@ -4800,6 +4990,10 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
     const curBuyFee = Number(options.buyFee !== undefined ? options.buyFee : storage.getRobinhoodBuyFee());
     const curSellFee = Number(options.sellFee !== undefined ? options.sellFee : storage.getRobinhoodSellFee());
     const feeTier = Number(options.feeTier || storage.getRobinhoodV3FeeTier() || 10000);
+    const curMcap = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getRobinhoodTargetMcap());
+    const liqInfo = curMcap > 0 && dexVersion !== 'v2'
+      ? `<b>Virtual Bonding Curve ($${curMcap.toLocaleString()} FDV - 0 ETH LP)</b>`
+      : `<b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(symbol)}</b>`;
 
     const initialMsg = await ctx.replyWithHTML(
       `🏹 <b>MEMULAI DEPLOYMENT KE ROBINHOOD CHAIN (ID 4663)</b>\n` +
@@ -4808,7 +5002,7 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
       `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
       `• DEX Engine: <b>${dexName}</b>\n` +
       `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
-      `• Likuiditas Pool: <b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(symbol)}</b>\n` +
+      `• Mode Likuiditas: ${liqInfo}\n` +
       `• Dev Buy Otomatis: <b>${Number(devBuyEth) > 0 ? `${devBuyEth} ETH` : 'Nonaktif'}</b>\n` +
       `• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>\n` +
       `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
@@ -4845,6 +5039,7 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
         devBuyEth,
         buyFee: curBuyFee,
         sellFee: curSellFee,
+        targetMarketCapUsd: curMcap,
         totalSupply: options.totalSupply || config.robinhoodDefaultTotalSupply
       };
 
@@ -5019,24 +5214,29 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Status saat ini: ${statusLabel}
 
-📚 <b>CARA KERJA MARKET CAP ALA CLANKER:</b>
-• Jika Market Cap diatur (misal <b>$35,000</b>), bot memasang <b>Single-Sided Concentrated Liquidity (Uniswap V4/V3)</b> tepat pada <i>starting tick</i> sesuai harga USD target.
+📚 <b>CARA KERJA VIRTUAL LIQUIDITY &amp; BONDING CURVE:</b>
+• Jika Market Cap diatur (misal <b>$35,000</b> atau <b>$2.5k - $5k</b>), bot memasang <b>Single-Sided Concentrated Liquidity (Uniswap V4/V3)</b> tepat pada <i>starting tick</i> sesuai harga target FDV.
 • Modal LP tidak lagi membutuhkan ETH/HYPE senilai puluhan ribu dolar — cukup <b>100% token saja (0 quote di LP)</b>!
-• Saat Dev Buy atau pembeli pertama masuk, quote (ETH/WETH/HYPE/USDC) langsung masuk mengisi pool mulai dari FDV target tersebut.
+• <b>Virtual Liquidity Display:</b> Defined.fi &amp; DexScreener otomatis menampilkan likuiditas pool ribuan dolar (<b>$1.000 - $12.900+ USD</b>) berkat rumus kedalaman concentrated curve!
+• Saat Dev Buy atau pembeli pertama masuk, quote (ETH/HYPE) langsung mengisi pool mulai dari starting FDV tersebut.
 
 💬 <b>Custom angka lewat chat:</b>
-Ketik <code>${meta.cmd} 35000</code> (atau <code>${meta.cmd} 50k</code>, <code>${meta.cmd} off</code>)
+Ketik <code>${meta.cmd} 35000</code> (atau <code>${meta.cmd} 5k</code>, <code>${meta.cmd} 2500</code>, <code>${meta.cmd} off</code>)
 
 👇 <i>Pilih preset cepat di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
+        Markup.button.callback(`${check(2500)}$2.5k`, `set_mcap_${chain}_2500`),
+        Markup.button.callback(`${check(5000)}$5k`, `set_mcap_${chain}_5000`),
         Markup.button.callback(`${check(10000)}$10k`, `set_mcap_${chain}_10000`),
-        Markup.button.callback(`${check(27000)}$27k (Clanker)`, `set_mcap_${chain}_27000`),
-        Markup.button.callback(`${check(35000)}$35k ⭐`, `set_mcap_${chain}_35000`),
       ],
       [
+        Markup.button.callback(`${check(27000)}$27k (Clanker)`, `set_mcap_${chain}_27000`),
+        Markup.button.callback(`${check(35000)}$35k ⭐`, `set_mcap_${chain}_35000`),
         Markup.button.callback(`${check(50000)}$50k`, `set_mcap_${chain}_50000`),
+      ],
+      [
         Markup.button.callback(`${check(100000)}$100k`, `set_mcap_${chain}_100000`),
         Markup.button.callback(`${check(0)}OFF (Full Range)`, `set_mcap_${chain}_0`),
       ],

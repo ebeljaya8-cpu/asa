@@ -131,6 +131,9 @@ export const config = {
   elysiumDevBuyHype: parseFloat(process.env.ELYSIUM_DEV_BUY_HYPE || '0.0001'),
   elysiumDefaultTargetMcap: parseFloat(process.env.ELYSIUM_TARGET_MCAP || '35000'),
   elysiumDefaultTotalSupply: process.env.ELYSIUM_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
+  elysiumMontraFactory: process.env.ELYSIUM_MONTRA_FACTORY || '0x38D3ef3A06D18fA3286Fb5dEAfe611be725fcD15',
+  elysiumMontraHook: process.env.ELYSIUM_MONTRA_HOOK || '0x6b1216A40B65c83e9c9e18a562C446697B8cf8EC',
+  elysiumMontraRouter: process.env.ELYSIUM_MONTRA_ROUTER || '0xc6E9a8E1a99023B67067B8A3605403b8d7B3A157',
 
   // Robinhood Chain Settings (Chain ID: 4663, Gas: ETH)
   robinhoodRpcUrl: process.env.ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com',
@@ -153,6 +156,7 @@ export const config = {
   robinhoodDefaultTotalSupply: process.env.ROBINHOOD_DEFAULT_TOTAL_SUPPLY || '100000000000', // 100B
   robinhoodDefaultBuyFee: parseFloat(process.env.ROBINHOOD_DEFAULT_BUY_FEE || '5'),
   robinhoodDefaultSellFee: parseFloat(process.env.ROBINHOOD_DEFAULT_SELL_FEE || '5'),
+  robinhoodPonsFactory: process.env.ROBINHOOD_PONS_FACTORY || '0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e',
 
   // Respan AI Gateway (Gemini 4 Carbon Free)
   respanApiKey: process.env.RESPAN_API_KEY || '',
