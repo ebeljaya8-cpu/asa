@@ -1354,8 +1354,8 @@ export class TelegramBotApp {
       });
     });
 
-    bot.action('cmd_ai_deploy_robinhood', async (ctx) => {
-      await ctx.answerCbQuery().catch(() => {});
+    bot.action('cmd_ai_deploy_rh_v5', async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy AI token via Official Clanker V5...').catch(() => {});
       if (!this.latestAIToken) {
         return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
       }
@@ -1364,10 +1364,54 @@ export class TelegramBotApp {
         name: t.name,
         symbol: t.symbol,
         imageUrl: t.imageUrl,
+        mode: 'v5',
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee()
+      });
+    });
+
+    bot.action('cmd_ai_deploy_rh_v4', async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy AI token via Clanker V4 (Airdrop 2 Wallet)...').catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await this.executeDeployRobinhood(ctx, {
+        name: t.name,
+        symbol: t.symbol,
+        imageUrl: t.imageUrl,
+        mode: 'v4',
         pair: storage.getRobinhoodPairToken(),
         ethLiquidity: String(storage.getRobinhoodLpEth()),
         buyFee: storage.getRobinhoodBuyFee(),
-        sellFee: storage.getRobinhoodSellFee()
+        sellFee: storage.getRobinhoodSellFee(),
+        targetMarketCapUsd: storage.getRobinhoodTargetMcap(),
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
+    bot.action('cmd_ai_deploy_robinhood', async (ctx) => {
+      const mode = storage.getRobinhoodDeployMode() || 'v5';
+      await ctx.answerCbQuery(`Menyiapkan deploy AI token Robinhood (${mode.toUpperCase()})...`).catch(() => {});
+      if (!this.latestAIToken) {
+        return ctx.reply('⚠️ Tidak ada konsep token AI yang aktif. Buat ide baru dengan /aitoken');
+      }
+      const t = this.latestAIToken;
+      await this.executeDeployRobinhood(ctx, {
+        name: t.name,
+        symbol: t.symbol,
+        imageUrl: t.imageUrl,
+        mode,
+        pair: storage.getRobinhoodPairToken(),
+        ethLiquidity: String(storage.getRobinhoodLpEth()),
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee(),
+        targetMarketCapUsd: storage.getRobinhoodTargetMcap(),
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
       });
     });
 
@@ -1768,25 +1812,60 @@ export class TelegramBotApp {
       await this.sendRobinhoodFeeMenu(ctx, true);
     });
 
-    bot.action('cmd_robinhood_quick_demo', async (ctx) => {
-      await ctx.answerCbQuery('⏳ Memulai deploy demo ke Robinhood...').catch(() => {});
+    bot.action('cmd_rh_quick_v5', async (ctx) => {
+      await ctx.answerCbQuery('⏳ Memulai Quick Deploy via Official Clanker V5...').catch(() => {});
       const randomTag = Math.floor(100 + Math.random() * 900);
       await this.executeDeployRobinhood(ctx, {
-        name: `Robinhood Gem ${randomTag}`,
-        symbol: `RH${randomTag}`,
+        name: `Clanker V5 Gem ${randomTag}`,
+        symbol: `CV5_${randomTag}`,
+        mode: 'v5',
+        imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee()
+      });
+    });
+
+    bot.action('cmd_rh_quick_v4', async (ctx) => {
+      await ctx.answerCbQuery('⏳ Memulai Quick Deploy Clanker V4 (Airdrop 2 Wallet)...').catch(() => {});
+      const randomTag = Math.floor(100 + Math.random() * 900);
+      await this.executeDeployRobinhood(ctx, {
+        name: `Clanker V4 Gem ${randomTag}`,
+        symbol: `CV4_${randomTag}`,
+        mode: 'v4',
         imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
         pair: storage.getRobinhoodPairToken(),
         ethLiquidity: String(storage.getRobinhoodLpEth()),
         buyFee: storage.getRobinhoodBuyFee(),
         sellFee: storage.getRobinhoodSellFee(),
+        targetMarketCapUsd: storage.getRobinhoodTargetMcap(),
         sniperBuyFee: 80,
         sniperWindowMinutes: 30,
         lockAmount: 0n
       });
     });
 
-    bot.action(/^d_rh_(\d+)$/, async (ctx) => {
-      await ctx.answerCbQuery('Menyiapkan deploy ke Robinhood Chain...').catch(() => {});
+    bot.action('cmd_robinhood_quick_demo', async (ctx) => {
+      const mode = storage.getRobinhoodDeployMode() || 'v5';
+      await ctx.answerCbQuery(`⏳ Memulai deploy demo ke Robinhood (Mode: ${mode.toUpperCase()})...`).catch(() => {});
+      const randomTag = Math.floor(100 + Math.random() * 900);
+      await this.executeDeployRobinhood(ctx, {
+        name: `Robinhood Gem ${randomTag}`,
+        symbol: `RH${randomTag}`,
+        mode,
+        imageUrl: 'https://assets.coingecko.com/coins/images/placeholder.png',
+        pair: storage.getRobinhoodPairToken(),
+        ethLiquidity: String(storage.getRobinhoodLpEth()),
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee(),
+        targetMarketCapUsd: storage.getRobinhoodTargetMcap(),
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
+    bot.action(/^d_rh_v5_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy via Official Clanker V5...').catch(() => {});
       const idx = parseInt(ctx.match[1], 10);
       const targetToken = this.trendingCache ? this.trendingCache[idx] : null;
       if (!targetToken) {
@@ -1796,10 +1875,53 @@ export class TelegramBotApp {
         name: targetToken.name,
         symbol: targetToken.symbol,
         imageUrl: targetToken.imageUrl,
+        mode: 'v5',
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee()
+      });
+    });
+
+    bot.action(/^d_rh_v4_(\d+)$/, async (ctx) => {
+      await ctx.answerCbQuery('Menyiapkan deploy Clanker V4 (Airdrop 2 Wallet)...').catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      const targetToken = this.trendingCache ? this.trendingCache[idx] : null;
+      if (!targetToken) {
+        return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending robinhood lagi.');
+      }
+      await this.executeDeployRobinhood(ctx, {
+        name: targetToken.name,
+        symbol: targetToken.symbol,
+        imageUrl: targetToken.imageUrl,
+        mode: 'v4',
         pair: storage.getRobinhoodPairToken(),
         ethLiquidity: String(storage.getRobinhoodLpEth()),
         buyFee: storage.getRobinhoodBuyFee(),
         sellFee: storage.getRobinhoodSellFee(),
+        targetMarketCapUsd: storage.getRobinhoodTargetMcap(),
+        sniperBuyFee: 80,
+        sniperWindowMinutes: 30,
+        lockAmount: 0n
+      });
+    });
+
+    bot.action(/^d_rh_(\d+)$/, async (ctx) => {
+      const mode = storage.getRobinhoodDeployMode() || 'v5';
+      await ctx.answerCbQuery(`Menyiapkan deploy Robinhood (Mode: ${mode.toUpperCase()})...`).catch(() => {});
+      const idx = parseInt(ctx.match[1], 10);
+      const targetToken = this.trendingCache ? this.trendingCache[idx] : null;
+      if (!targetToken) {
+        return ctx.reply('⚠️ Data token tidak ditemukan di cache. Silakan buka /trending robinhood lagi.');
+      }
+      await this.executeDeployRobinhood(ctx, {
+        name: targetToken.name,
+        symbol: targetToken.symbol,
+        imageUrl: targetToken.imageUrl,
+        mode,
+        pair: storage.getRobinhoodPairToken(),
+        ethLiquidity: String(storage.getRobinhoodLpEth()),
+        buyFee: storage.getRobinhoodBuyFee(),
+        sellFee: storage.getRobinhoodSellFee(),
+        targetMarketCapUsd: storage.getRobinhoodTargetMcap(),
         sniperBuyFee: 80,
         sniperWindowMinutes: 30,
         lockAmount: 0n
@@ -2675,7 +2797,10 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
         const buttons = [];
         const srcNet = (token.sourceNetwork || '').toLowerCase();
         if (category === 'robinhood' || category === 'rh' || srcNet.includes('robinhood')) {
-          buttons.push([Markup.button.callback(`🏹 Deploy ke Robinhood Mainnet`, `d_rh_${index}`)]);
+          buttons.push([
+            Markup.button.callback(`⚡ Clanker V4 (Robinhood)`, `d_rh_v4_${index}`),
+            Markup.button.callback(`🔥 Clanker V5 (Robinhood)`, `d_rh_v5_${index}`)
+          ]);
           buttons.push([
             Markup.button.callback(`⚡ Deploy Mandiri (Base)`, `d_basedir_${index}`),
             Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
@@ -2694,7 +2819,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
             Markup.button.callback(`🚀 Clanker (Base)`, `d_idx_${index}`)
           ]);
           buttons.push([
-            Markup.button.callback(`🏹 Deploy ke Robinhood`, `d_rh_${index}`)
+            Markup.button.callback(`⚡ Clanker V4 (RH)`, `d_rh_v4_${index}`),
+            Markup.button.callback(`🔥 Clanker V5 (RH)`, `d_rh_v5_${index}`)
           ]);
         } else {
           buttons.push([
@@ -2706,7 +2832,8 @@ Pilih kategori platform dan jaringan untuk melihat token viral yang siap dideplo
             Markup.button.callback(`🔥 Montra (Elysium)`, `d_montra_${index}`)
           ]);
           buttons.push([
-            Markup.button.callback(`🏹 Deploy ke Robinhood`, `d_rh_${index}`)
+            Markup.button.callback(`⚡ Clanker V4 (RH)`, `d_rh_v4_${index}`),
+            Markup.button.callback(`🔥 Clanker V5 (RH)`, `d_rh_v5_${index}`)
           ]);
         }
 
@@ -3295,14 +3422,15 @@ Untuk memasang atau mengganti private key Wallet ${idx}, kirimkan pesan dengan f
 
       const keyboard = Markup.inlineKeyboard([
         [
+          Markup.button.callback(`⚡ Clanker V4 (Robinhood)`, 'cmd_ai_deploy_rh_v4'),
+          Markup.button.callback(`🔥 Clanker V5 (Robinhood)`, 'cmd_ai_deploy_rh_v5')
+        ],
+        [
           Markup.button.callback(`🪐 Deploy Elysium (Mandiri)`, 'cmd_ai_deploy_elysium'),
           Markup.button.callback(`🔥 Montra (Elysium)`, 'cmd_ai_deploy_montra')
         ],
         [
-          Markup.button.callback(`🏹 Deploy ke Robinhood`, 'cmd_ai_deploy_robinhood'),
-          Markup.button.callback(`🔵 Deploy Base Mandiri`, 'cmd_ai_deploy_base')
-        ],
-        [
+          Markup.button.callback(`🔵 Deploy Base Mandiri`, 'cmd_ai_deploy_base'),
           Markup.button.callback(`🚀 Deploy via Clanker (Base)`, 'cmd_ai_deploy_clanker')
         ],
         [
@@ -4901,37 +5029,52 @@ Pengaturan fee ini <b>khusus berlaku untuk jaringan Robinhood Chain</b> (Chain I
     const curBuyFee = storage.getRobinhoodBuyFee();
     const curSellFee = storage.getRobinhoodSellFee();
 
+    const curMode = storage.getRobinhoodDeployMode();
+    const curMcap = storage.getRobinhoodTargetMcap();
+    const modeText = curMode === 'v5'
+      ? '🔥 <b>Official Clanker V5 (Defined.fi Instant & 50/50 Fee Share)</b>'
+      : '⚡ <b>Clanker V4 Custom (Airdrop 82B ke 2 Dev Wallet & Virtual Liq)</b>';
+    const modeBtn = curMode === 'v5'
+      ? '🚀 Mode: Clanker V5 (Ganti ke V4)'
+      : '🚀 Mode: Clanker V4 (Ganti ke V5)';
+
     const msg =
-`🚀 <b>DEPLOY TOKEN KE ROBINHOOD CHAIN (ID: 4663)</b>
+`🚀 <b>PANEL DEPLOY ROBINHOOD CHAIN (ID: 4663)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Gunakan perintah berikut untuk deploy token ERC-20 mandiri ke Robinhood Chain (Gas ETH):
+Pilih mode peluncuran token di <b>Robinhood Chain</b> (Mendukung Clanker V5 &amp; Clanker V4):
 
-<b>Format perintah:</b>
-<code>/deployrobinhood [NamaToken] [TICKER] [Pair] [LpETH] [Fee%] [ImageUrl]</code>
+🔥 <b>MODE 1: OFFICIAL CLANKER V5</b>
+• Protocol: Official Clanker V5 Factory (<code>0xcA111dcdd2cE924c3378d6514fDCbC46217bcA16</code>)
+• CREATE2 Salt: Mined otomatis akhiran <code>cccc</code>
+• Pool Uniswap V4: 100% Supply Token langsung masuk ke Pool
+• Fee Rewards: <b>50% Wallet 1 / 50% Wallet 2 (data/airdrop.json)</b>
+• Indexing: <b>Langsung terdeteksi Sniper Bot, Defined.fi &amp; DexScreener ⚡</b>
 
-<b>Contoh siap pakai (sesuai setting aktif):</b>
-<code>/deployrobinhood MoonToken MOON ${curPair} ${curLp} ${curBuyFee}</code>
+⚡ <b>MODE 2: CLANKER V4 (AIRDROP 2 WALLET &amp; BONDING CURVE)</b>
+• Airdrop Dev: <b>42.5B Wallet 1 + 39.5B Wallet 2 (Total 82B Token)</b>
+• Pool Uniswap V4: Sisa supply (18B) disetor ke Pool
+• Virtual Liquidity: Target Market Cap $35.000 dengan modal ETH &lt; $1
+• Proteksi: Tax 5% Buy / 5% Sell + 80% Anti-Sniper Tax (30 Menit)
 
-⚙️ <b>Setting Aktif:</b>
-• DEX Engine: <b>Uniswap ${curDex}</b>
-• Trading Pair: <b>TOKEN / ${curPair}</b>
-• LP Awal: <b>${curLp} ETH</b> + <b>20B Token</b>
-• Dev Buy: <b>${curDevBuy > 0 ? curDevBuy + ' ETH' : 'Nonaktif'}</b>
-• Fee: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
-• Anti-Sniper: <b>80% Buy Tax (30 Menit)</b>
-• Team Lock: <b>6B Token (3 Jam)</b>`;
+🎯 <b>Status Setting Aktif:</b>
+• Mode Deploy: ${modeText}
+• Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Dev Buy Otomatis: <b>${curDevBuy > 0 ? curDevBuy + ' ETH' : 'Nonaktif'}</b>
+• Target Market Cap: <b>$${curMcap.toLocaleString()} USD</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Pilih deploy langsung atau ganti mode di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('🎯 Quick Demo Deploy', 'cmd_robinhood_quick_demo'),
-        Markup.button.callback('⚙️ Ubah Setting', 'cmd_robinhood_settings')
+        Markup.button.callback('🔥 Quick Deploy Clanker V5', 'cmd_rh_quick_v5'),
+        Markup.button.callback('⚡ Quick Deploy Clanker V4', 'cmd_rh_quick_v4')
       ],
       [
-        Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_robinhood_pair_menu'),
-        Markup.button.callback(`🏷️ Fee: ${curBuyFee}%/${curSellFee}%`, 'cmd_robinhood_fee_menu')
+        Markup.button.callback(modeBtn, 'cmd_rh_mode_toggle'),
+        Markup.button.callback('⚙️ Ubah Setting Fee / LP', 'cmd_robinhood_settings')
       ],
       [
-        Markup.button.callback('💧 Atur LP & Dev Buy', 'cmd_robinhood_lp_menu'),
+        Markup.button.callback(`🏷️ Fee: ${curBuyFee}%/${curSellFee}%`, 'cmd_robinhood_fee_menu'),
         Markup.button.callback('🏹 Kembali ke Menu Robinhood', 'cmd_robinhood_menu')
       ]
     ]);
