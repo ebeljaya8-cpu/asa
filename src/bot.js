@@ -1865,6 +1865,17 @@ export class TelegramBotApp {
       await this.sendTargetMcapMenu(ctx, 'rh');
     });
 
+    bot.action('cmd_rh_mode_toggle', async (ctx) => {
+      const current = storage.getRobinhoodDeployMode();
+      const next = current === 'v5' ? 'v4' : 'v5';
+      storage.setRobinhoodDeployMode(next);
+      const text = next === 'v5'
+        ? '🔥 Mode: Official Clanker V5 (Defined.fi Instant, Mining Salt cccc, Fee Sharing 50/50 ke 2 Dev Wallet)!'
+        : '⚡ Mode: Clanker V4 (Airdrop 82B Token ke 2 Dev Wallet, 5% Tax & 80% Anti-Sniper, Virtual Liquidity Bonding Curve)!';
+      await ctx.answerCbQuery(text, { show_alert: true }).catch(() => {});
+      await this.sendRobinhoodMenu(ctx, true);
+    });
+
     bot.action(/^set_mcap_(base|elys|rh)_(\d+)$/, async (ctx) => {
       const chain = ctx.match[1];
       const val = parseInt(ctx.match[2], 10);
@@ -4568,7 +4579,16 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
     const curSellFee = storage.getRobinhoodSellFee();
     const curV3Fee = storage.getRobinhoodV3FeeTier();
     const curMcap = storage.getRobinhoodTargetMcap();
-    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided ala Clanker)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
+    const curMode = storage.getRobinhoodDeployMode();
+
+    const modeBadge = curMode === 'v5'
+      ? '🔥 <b>Official Clanker V5 (Defined.fi Instant, Hook Pool & Fee Sharing 50/50 ke 2 Dev Wallet)</b>'
+      : '⚡ <b>Clanker V4 Custom (Airdrop 82B Token ke 2 Dev Wallet, 5% Tax & 80% Anti-Sniper)</b>';
+    const modeBtn = curMode === 'v5'
+      ? '🚀 Mode: Clanker V5 (Official)'
+      : '🚀 Mode: Clanker V4 (Airdrop 2 Wallet)';
+
+    const mcapText = curMcap > 0 ? `🎯 <b>$${curMcap.toLocaleString('en-US')} USD</b> <i>(Single-Sided Virtual Liq)</i>` : '🦄 <i>Full-Range (Manual LP)</i>';
     const mcapBtn = curMcap > 0 ? `🎯 MCap: $${curMcap >= 1000 ? `${Math.round(curMcap / 1000)}k` : curMcap}` : '🎯 MCap: OFF';
     const devBuyText = curDevBuy > 0 ? `<b>${curDevBuy} ETH</b>` : '🔴 <i>Nonaktif (0 ETH)</i>';
 
@@ -4582,7 +4602,7 @@ ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devB
     const msg =
 `🏹 <b>ROBINHOOD CHAIN LAUNCHPAD &amp; HUB (CHAIN ID 4663)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Pusat deploy &amp; kelola token mandiri di <b>Robinhood Chain</b> (konfigurasi lengkap setara Elysium)!
+Pusat deploy &amp; kelola token di <b>Robinhood Chain</b> (Dual Mode: Official Clanker V5 &amp; Clanker V4)!
 
 👛 <b>INFO DEPLOYER WALLET:</b>
 • Alamat: ${addrDisplay}
@@ -4590,39 +4610,39 @@ Pusat deploy &amp; kelola token mandiri di <b>Robinhood Chain</b> (konfigurasi l
 • Saldo WETH: <b>${balWeth.toFixed(6)} WETH</b>
 • Saldo USDG: <b>${balUsdg.toFixed(4)} USDG</b>
 • Estimasi Gas: <code>${info.gasPriceGwei} Gwei</code>
+• Clanker V5 Factory: <code>0xcA111dcdd2cE924c3378d6514fDCbC46217bcA16</code>
 • PoolManager V4: <code>${info.v4PoolManager || config.robinhoodV4PoolManager}</code>
-• Position Manager V4: <code>${info.v4PositionManager || config.robinhoodV4PositionManager}</code>
-• Universal Router: <code>${info.universalRouter || config.robinhoodUniversalRouter}</code>
 
 ⚙️ <b>SETTING TRADING &amp; LIQUIDITY:</b>
+• Mode Deploy Aktif: ${modeBadge}
 • DEX Engine: ${dexBadge}
 • Trading Pair: ${pairBadge}
-• Fee Tier Pool: <b>${curV3Fee / 10000}% (${curV3Fee} bps)</b>
+• Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Airdrop Dev: <b>82B Token (42.5B W1 + 39.5B W2 di Mode V4 / 50% Fee Share di Mode V5)</b>
 • Target Market Cap: ${mcapText}
 • Likuiditas Pool (LP): <b>${curLp} ETH / Quote</b>
 • Dev Buy Otomatis: ${devBuyText}
-• Fee Buy &amp; Sell: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
-• Proteksi Default: <b>Anti-Sniper 80% Buy Tax (30 Menit)</b>
+• Proteksi Default: <b>Anti-Sniper (Decaying / 80% Buy Tax)</b>
 • Total Token Dideploy: <b>${totalCount} token</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <i>Pilih menu pengaturan atau deploy di bawah:</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('🚀 Deploy Token Baru ke Robinhood', 'cmd_robinhood_deploy_menu'),
-        Markup.button.callback('🔥 Trending Robinhood', 'cmd_trending_rh')
+        Markup.button.callback('🚀 Deploy Token Baru', 'cmd_robinhood_deploy_menu'),
+        Markup.button.callback(modeBtn, 'cmd_rh_mode_toggle')
+      ],
+      [
+        Markup.button.callback('🔥 Trending Robinhood', 'cmd_trending_rh'),
+        Markup.button.callback(mcapBtn, 'cmd_rh_mcap_menu')
       ],
       [
         Markup.button.callback(`🔄 Pair: ${curPair}`, 'cmd_robinhood_pair_menu'),
         Markup.button.callback(`✨ DEX: Uniswap ${curDex}`, 'cmd_robinhood_dex_menu')
       ],
       [
-        Markup.button.callback(mcapBtn, 'cmd_rh_mcap_menu'),
-        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_robinhood_lp_menu')
-      ],
-      [
         Markup.button.callback(`🏷️ Atur Fee (${curBuyFee}% / ${curSellFee}%)`, 'cmd_robinhood_fee_menu'),
-        Markup.button.callback('🛠️ Semua Setting', 'cmd_robinhood_settings')
+        Markup.button.callback('⚙️ Atur LP & Dev Buy', 'cmd_robinhood_lp_menu')
       ],
       [
         Markup.button.callback(`📜 Riwayat Deploy (${totalCount})`, 'cmd_robinhood_history'),
@@ -4982,31 +5002,47 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
       return ctx.replyWithHTML('⚠️ <b>Nama dan ticker token wajib diisi!</b>\nContoh: <code>/deployrobinhood MoonToken MOON</code>');
     }
 
+    const activeMode = (options.mode || storage.getRobinhoodDeployMode() || 'v5').toLowerCase();
+    const isV5 = activeMode === 'v5';
+    const totalSteps = isV5 ? 5 : 8;
+
     const ethLp = String(options.ethLiquidity || storage.getRobinhoodLpEth() || '0.00001');
     const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : storage.getRobinhoodDevBuyEth());
     const pairChoice = (options.pair || storage.getRobinhoodPairToken() || 'ETH').toUpperCase();
     const dexVersion = (options.dexVersion || storage.getRobinhoodDexVersion() || 'v4').toLowerCase();
-    const dexName = dexVersion === 'v4' ? 'Uniswap V4' : 'Uniswap V3';
+    const dexName = isV5 ? 'Official Clanker V5 Factory' : (dexVersion === 'v4' ? 'Uniswap V4' : 'Uniswap V3');
     const curBuyFee = Number(options.buyFee !== undefined ? options.buyFee : storage.getRobinhoodBuyFee());
     const curSellFee = Number(options.sellFee !== undefined ? options.sellFee : storage.getRobinhoodSellFee());
     const feeTier = Number(options.feeTier || storage.getRobinhoodV3FeeTier() || 10000);
     const curMcap = Number(options.targetMarketCapUsd !== undefined ? options.targetMarketCapUsd : storage.getRobinhoodTargetMcap());
-    const liqInfo = curMcap > 0 && dexVersion !== 'v2'
-      ? `<b>Virtual Bonding Curve ($${curMcap.toLocaleString()} FDV - 0 ETH LP)</b>`
-      : `<b>${ethLp} ETH / Quote</b> + <b>20B ${escapeHtml(symbol)}</b>`;
+
+    const modeText = isV5
+      ? '🔥 <b>Official Clanker V5 (Defined.fi Instant, Hook Pool & 50/50 Fee Share)</b>'
+      : '⚡ <b>Clanker V4 Custom (Airdrop 82B ke 2 Dev Wallet + Tax 5% & Anti-Sniper)</b>';
+
+    const devRewardText = isV5
+      ? '• Fee Sharing Dev: <b>50% Wallet 1 / 50% Wallet 2 (data/airdrop.json)</b>\n'
+      : '• Airdrop Dev: <b>42.5B Wallet 1 + 39.5B Wallet 2 (Total 82B Token)</b>\n';
+
+    const liqInfo = isV5
+      ? '<b>100% Supply ke Uniswap V4 Pool (Clanker V5 Hook)</b>'
+      : (curMcap > 0 && dexVersion !== 'v2'
+          ? `<b>Virtual Bonding Curve ($${curMcap.toLocaleString()} FDV - 0 ETH LP)</b>`
+          : `<b>${ethLp} ETH / Quote</b> + <b>18B ${escapeHtml(symbol)}</b>`);
 
     const initialMsg = await ctx.replyWithHTML(
       `🏹 <b>MEMULAI DEPLOYMENT KE ROBINHOOD CHAIN (ID 4663)</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Platform: ${modeText}\n` +
       `• Token: <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)\n` +
       `• Logo: <b>${options.imageUrl ? 'Logo Diterapkan (IPFS) ✅' : 'Default Pinata Logo'}</b>\n` +
-      `• DEX Engine: <b>${dexName}</b>\n` +
-      `• Trading Pair: <b>TOKEN / ${pairChoice}</b>\n` +
+      `• Engine: <b>${dexName}</b>\n` +
+      devRewardText +
       `• Mode Likuiditas: ${liqInfo}\n` +
       `• Dev Buy Otomatis: <b>${Number(devBuyEth) > 0 ? `${devBuyEth} ETH` : 'Nonaktif'}</b>\n` +
       `• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>\n` +
-      `• Proteksi Sniper: <b>80% Buy Tax (30 Menit Pertama)</b>\n\n` +
-      `⏳ <i>Langkah 1/8: Memeriksa saldo ETH, quote token, &amp; parameter on-chain...</i>`
+      `• Proteksi: <b>Anti-Sniper Hook (Decaying / 80% Buy Tax)</b>\n\n` +
+      `⏳ <i>Langkah 1/${totalSteps}: Memeriksa saldo ETH &amp; parameter deployer on-chain...</i>`
     );
 
     const progressUpdates = async (step, msg) => {
@@ -5017,9 +5053,9 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
           null,
           `🏹 <b>DEPLOYMENT KE ROBINHOOD CHAIN (ID 4663)</b>\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• Platform: ${modeText}\n` +
           `• Token: <b>${escapeHtml(name)}</b> (<code>$${escapeHtml(symbol)}</code>)\n` +
-          `• DEX &amp; Pair: <b>${dexName}</b> (Pair: <code>${pairChoice}</code>)\n` +
-          `• Status: <b>Langkah ${step}/8</b>\n\n` +
+          `• Status: <b>Langkah ${step}/${totalSteps}</b>\n\n` +
           `⏳ <i>${escapeHtml(msg)}</i>`,
           { parse_mode: 'HTML' }
         );
@@ -5031,6 +5067,7 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
         ...options,
         name,
         symbol,
+        mode: activeMode,
         imageUrl: options.imageUrl || '',
         pair: pairChoice,
         dexVersion,
@@ -5045,15 +5082,61 @@ Atur seluruh parameter deploy Robinhood Chain langsung lewat tombol interaktif d
 
       const result = await robinhoodService.deployToken(deployOptions, progressUpdates);
 
-      const summaryMsg =
-`🎉 <b>TOKEN BERHASIL DIDEPLOY &amp; LIVE DI ROBINHOOD CHAIN!</b>
+      let summaryMsg = '';
+      let buttons = [];
+
+      if (result.mode === 'v5' || result.dexVersion === 'Clanker V5') {
+        summaryMsg =
+`🎉 <b>TOKEN BERHASIL DIDEPLOY VIA OFFICIAL CLANKER V5!</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
+Token resmi terdaftar di <b>Robinhood Chain</b> via Clanker V5 Factory &amp; Hook:
+
 🪙 <b>Info Token:</b>
 • Nama: <b>${escapeHtml(result.token.name)}</b>
 • Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
 • Kontrak Token: <code>${result.token.address}</code>
 • Logo IPFS/URL: <a href="${toHttpImageUrl(result.token?.imageUrl || options.imageUrl)}">Lihat Gambar Logo</a>
+• Total Supply: <b>100,000,000,000 (100% di Pool)</b>
+
+💧 <b>Clanker V5 Uniswap V4 Pool:</b>
+• Pool ID: <code>${result.liquidity.poolAddress || 'V4 Hook Pool'}</code>
+• Trading Pair: <b>TOKEN / ETH</b>
+• Fee Transaksi: <b>${curBuyFee}% Buy / ${curSellFee}% Sell</b>
+• Fee Sharing Dev: <b>50% Wallet 1 / 50% Wallet 2 (2 Dev Wallets)</b>
+• Dev Buy Otomatis: <b>${result.liquidity.devBuyEth}</b>
+• Proteksi Sniper: <b>Anti-Snipe Hook Natively Enabled 🛡️</b>
+• Status Trading: <b>🟢 AKTIF &amp; Terdeteksi Defined.fi Radar!</b>
+
+🔗 <b>Transaction Hash:</b>
+• Deploy Tx: <a href="${result.urls.tokenExplorer}">${result.token.deployTxHash.slice(0, 16)}...</a>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>Buka di Explorer, Defined.fi Radar, DexScreener, atau Clanker.world:</i>`;
+
+        buttons = [
+          [
+            Markup.button.url('🔍 Blockscout Explorer', result.urls.tokenExplorer),
+            Markup.button.url('⚡ Defined.fi Radar', result.urls.definedFi || 'https://un.defined.fi/tokens/discover?rankingBy=createdAt&rankingDirection=DESC&network=robinhood')
+          ],
+          [
+            Markup.button.url('📊 DexScreener', result.urls.dexscreener),
+            Markup.button.url('🌍 Clanker.world', result.urls.clankerWorld || `https://clanker.world/clanker/${result.token.address}`)
+          ],
+          [
+            Markup.button.callback('🏹 Dashboard Robinhood', 'cmd_robinhood_menu'),
+            Markup.button.callback('⬅️ Menu Utama', 'cmd_start_menu')
+          ]
+        ];
+      } else {
+        summaryMsg =
+`🎉 <b>TOKEN BERHASIL DIDEPLOY &amp; LIVE DI ROBINHOOD CHAIN!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Info Token (Mode V4 Airdrop 2 Wallet):</b>
+• Nama: <b>${escapeHtml(result.token.name)}</b>
+• Ticker: <code>$${escapeHtml(result.token.symbol)}</code>
+• Kontrak Token: <code>${result.token.address}</code>
+• Logo IPFS/URL: <a href="${toHttpImageUrl(result.token?.imageUrl || options.imageUrl)}">Lihat Gambar Logo</a>
 • Total Supply: <b>${Number(result.token.totalSupply || 100000000000).toLocaleString()}</b>
+• Airdrop Terkirim: <b>42.5B W1 + 39.5B W2 (Total 82B Token) ✅</b>
 
 💧 <b>${result.dexVersion} Pool &amp; Likuiditas:</b>
 • Trading Pair: <b>TOKEN / ${result.pairToken}</b>
@@ -5074,19 +5157,20 @@ ${result.lock?.address ? `• Timelock: <code>${result.lock.address}</code> (${r
 ${result.liquidity.devBuyTxHash ? `• Dev Buy Tx: <code>${result.liquidity.devBuyTxHash.slice(0, 14)}...</code>\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <i>Klik tautan di bawah untuk melihat di Blockscout Explorer &amp; DEX:</i>`;
 
-      const buttons = [
-        [
-          Markup.button.url('🔍 Lihat di Blockscout', result.urls.tokenExplorer),
-          Markup.button.url('📊 DexScreener', result.urls.dexscreener)
-        ],
-        [
-          Markup.button.url('💧 Lihat Pool di Explorer', result.urls.poolExplorer)
-        ],
-        [
-          Markup.button.callback('🏹 Dashboard Robinhood', 'cmd_robinhood_menu'),
-          Markup.button.callback('⬅️ Menu Utama', 'cmd_start_menu')
-        ]
-      ];
+        buttons = [
+          [
+            Markup.button.url('🔍 Lihat di Blockscout', result.urls.tokenExplorer),
+            Markup.button.url('📊 DexScreener', result.urls.dexscreener)
+          ],
+          [
+            Markup.button.url('💧 Lihat Pool di Explorer', result.urls.poolExplorer)
+          ],
+          [
+            Markup.button.callback('🏹 Dashboard Robinhood', 'cmd_robinhood_menu'),
+            Markup.button.callback('⬅️ Menu Utama', 'cmd_start_menu')
+          ]
+        ];
+      }
 
       const rawLogo = result.token?.imageUrl || options.imageUrl;
       const photoUrl = toHttpImageUrl(rawLogo);

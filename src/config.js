@@ -136,7 +136,7 @@ export const config = {
   elysiumMontraRouter: process.env.ELYSIUM_MONTRA_ROUTER || '0xc6E9a8E1a99023B67067B8A3605403b8d7B3A157',
 
   // Robinhood Chain Settings (Chain ID: 4663, Gas: ETH)
-  robinhoodRpcUrl: process.env.ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com',
+  robinhoodRpcUrl: process.env.ROBINHOOD_RPC_URL || 'https://robinhood-rpc.publicnode.com',
   robinhoodChainId: parseInt(process.env.ROBINHOOD_CHAIN_ID || '4663', 10),
   robinhoodExplorer: process.env.ROBINHOOD_EXPLORER || 'https://robinhoodchain.blockscout.com',
   robinhoodPrivateKey: process.env.ROBINHOOD_PRIVATE_KEY || process.env.ELYSIUM_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.PRIVATE_KEY_1 || process.env.PRIVATE_KEY || '',

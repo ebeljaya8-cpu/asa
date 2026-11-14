@@ -13,7 +13,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "clanker-sdk": "^4.2.19",
+    "clanker-sdk": "^5.1.0",
     "dotenv": "^18.0.5",
     "ethers": "^6.17.0",
     "node-telegram-bot-api": "^2.1.0",

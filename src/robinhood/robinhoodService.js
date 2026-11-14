@@ -2,7 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ethers } from 'ethers';
-import { config } from '../config.js';
+import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { robinhood } from 'clanker-sdk';
+import { Clanker as ClankerV5 } from 'clanker-sdk/v5';
+import { config, getAirdropEntries } from '../config.js';
 import { storage } from '../storage.js';
 import { pinataService } from '../pinataService.js';
 import { fetchQuoteUsdPrice, computeClankerMarketCapPosition } from '../utils/marketCapMath.js';
@@ -30,7 +34,7 @@ const RH_WETH              = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'; // WE
 const RH_USDG              = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'; // USDG (primary stablecoin)
 // Explorer
 const RH_EXPLORER          = 'https://robinhoodchain.blockscout.com';
-const RH_RPC               = 'https://rpc.mainnet.chain.robinhood.com';
+const RH_RPC               = 'https://robinhood-rpc.publicnode.com';
 const RH_CHAIN_ID          = 4663;
 
 // Uniswap V4 ABIs
@@ -273,8 +277,13 @@ export class RobinhoodService {
   }
 
   async deployToken(options = {}, onProgress = null) {
+    const activeMode = (options.mode || storage.getRobinhoodDeployMode() || 'v5').toLowerCase();
+    if (activeMode === 'v5' && options.mode !== 'v4' && options.mode !== 'direct') {
+      return await this.deployViaClankerV5(options, onProgress);
+    }
+
     const notify = (step, msg) => {
-      console.log(`[RobinhoodDeploy] Step ${step}: ${msg}`);
+      console.log(`[RobinhoodDeploy-V4] Step ${step}: ${msg}`);
       if (typeof onProgress === 'function') {
         try { onProgress(step, msg); } catch {}
       }
@@ -285,7 +294,7 @@ export class RobinhoodService {
       throw new Error('Private key deployer Robinhood belum dikonfigurasi di .env (ROBINHOOD_PRIVATE_KEY / ELYSIUM_PRIVATE_KEY / PRIVATE_KEY)');
     }
 
-    notify(1, 'Memeriksa saldo ETH, pair token, dan kesiapan jaringan Robinhood Chain...');
+    notify(1, 'Memeriksa saldo ETH, pair token, dan kesiapan jaringan Robinhood Chain (Mode V4 Airdrop 2 Wallet)...');
     const balance = await this.provider.getBalance(wallet.address);
 
     const dexVersion = (options.dexVersion || storage.getRobinhoodDexVersion() || 'v4').toLowerCase();
@@ -340,9 +349,34 @@ export class RobinhoodService {
     const sellFee       = Number(options.sellFee !== undefined ? options.sellFee : storage.getRobinhoodSellFee());
     const sniperBuyFee  = Number(options.sniperBuyFee ?? 80);
     const sniperWindowMinutes = Number(options.sniperWindowMinutes ?? 30);
-    const tokenLp       = options.tokenLiquidity ? BigInt(options.tokenLiquidity) : ethers.parseEther('20000000000');
-    const lockTokens    = options.lockAmount !== undefined ? BigInt(options.lockAmount) : ethers.parseEther('6000000000');
+
+    // Airdrop for 2 wallets identical to Base Clanker config
+    const airdropEntries = getAirdropEntries() || [];
+    let airdrop1 = ethers.ZeroAddress;
+    let airdropAmount1 = 0n;
+    let airdrop2 = ethers.ZeroAddress;
+    let airdropAmount2 = 0n;
+    let totalAirdrop = 0n;
+
+    if (airdropEntries.length >= 1 && airdropEntries[0]?.account) {
+      airdrop1 = airdropEntries[0].account;
+      const rawAmt = airdropEntries[0].amount;
+      airdropAmount1 = BigInt(rawAmt) < 10n ** 15n ? ethers.parseEther(String(rawAmt)) : BigInt(rawAmt);
+      totalAirdrop += airdropAmount1;
+    }
+    if (airdropEntries.length >= 2 && airdropEntries[1]?.account) {
+      airdrop2 = airdropEntries[1].account;
+      const rawAmt = airdropEntries[1].amount;
+      airdropAmount2 = BigInt(rawAmt) < 10n ** 15n ? ethers.parseEther(String(rawAmt)) : BigInt(rawAmt);
+      totalAirdrop += airdropAmount2;
+    }
+
+    const lockTokens    = options.lockAmount !== undefined ? BigInt(options.lockAmount) : ethers.parseEther('0');
     const lockHours     = Number(options.lockHours ?? 3);
+    const remainingAfterAirdrop = totalSupply - totalAirdrop - lockTokens;
+    const tokenLp       = options.tokenLiquidity 
+      ? BigInt(options.tokenLiquidity) 
+      : (remainingAfterAirdrop > 0n ? remainingAfterAirdrop : ethers.parseEther('18000000000'));
 
     // Logo / IPFS Upload
     let rawImageUrl = options.imageUrl || 'https://assets.coingecko.com/coins/images/placeholder.png';
@@ -358,7 +392,7 @@ export class RobinhoodService {
     }
 
     // Deploy ERC-20 Token
-    notify(2, `Mendeploy ERC-20 Token: ${name} ($${symbol}) di Robinhood Chain (ID: ${this.chainId})...`);
+    notify(2, `Mendeploy ERC-20 Token V4 (Airdrop 2 Wallet: ${ethers.formatUnits(totalAirdrop, 18)}): ${name} ($${symbol}) di Robinhood Chain...`);
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
     const tokenParams = {
@@ -370,10 +404,10 @@ export class RobinhoodService {
       sellFee,
       sniperBuyFee,
       sniperWindowMinutes,
-      airdrop1: ethers.ZeroAddress,
-      airdropAmount1: 0n,
-      airdrop2: ethers.ZeroAddress,
-      airdropAmount2: 0n
+      airdrop1,
+      airdropAmount1,
+      airdrop2,
+      airdropAmount2
     };
 
     const tupleType = 'tuple(string name, string symbol, uint256 totalSupply, address feeWallet, uint256 buyFee, uint256 sellFee, uint256 sniperBuyFee, uint256 sniperWindowMinutes, address airdrop1, uint256 airdropAmount1, address airdrop2, uint256 airdropAmount2)';
@@ -801,6 +835,178 @@ export class RobinhoodService {
         poolExplorer: poolExplorerUrl,
         dexscreener: dexscreenerUrl,
         geckoterminal: geckoterminalUrl
+      },
+      record
+    };
+  }
+
+  async deployViaClankerV5(options = {}, onProgress = null) {
+    const notify = (step, msg) => {
+      console.log(`[RobinhoodClankerV5] Step ${step}: ${msg}`);
+      if (typeof onProgress === 'function') {
+        try { onProgress(step, msg); } catch {}
+      }
+    };
+
+    const pk = config.robinhoodPrivateKey || config.elysiumPrivateKey || storage.getWalletPrivateKey(1);
+    if (!pk || !pk.startsWith('0x') || pk.length !== 66) {
+      throw new Error('Private key deployer Robinhood belum dikonfigurasi di .env (ROBINHOOD_PRIVATE_KEY / ELYSIUM_PRIVATE_KEY / PRIVATE_KEY)');
+    }
+
+    const account = privateKeyToAccount(pk);
+    const publicClient = createPublicClient({
+      chain: robinhood,
+      transport: http(this.rpcUrl)
+    });
+    const walletClient = createWalletClient({
+      account,
+      chain: robinhood,
+      transport: http(this.rpcUrl)
+    });
+    const clanker = new ClankerV5({ wallet: walletClient, publicClient });
+
+    notify(1, 'Memeriksa saldo ETH di Robinhood Chain via Clanker V5...');
+    const balance = await publicClient.getBalance({ address: account.address });
+
+    const devBuyEth = String(options.devBuyEth !== undefined ? options.devBuyEth : (storage.getRobinhoodDevBuyEth() ?? '0'));
+    const devBuyNum = parseFloat(devBuyEth) || 0;
+    const devBuyWei = devBuyNum > 0 ? parseEther(devBuyEth) : 0n;
+
+    if (balance < devBuyWei + parseEther('0.0005')) {
+      const curEth = ethers.formatEther(balance);
+      throw new Error(`Saldo ETH tidak mencukupi untuk gas & dev buy di Robinhood! Saldo: ${curEth} ETH.`);
+    }
+
+    const name = (options.name || 'Robinhood Token').trim();
+    const symbol = (options.symbol || 'RBTK').trim().toUpperCase();
+
+    let rawImageUrl = options.imageUrl || 'https://assets.coingecko.com/coins/images/placeholder.png';
+    let finalImageUrl = rawImageUrl;
+    if (rawImageUrl && !rawImageUrl.startsWith('ipfs://')) {
+      try {
+        notify(2, 'Mengunggah logo token ke IPFS via Pinata...');
+        finalImageUrl = await pinataService.uploadFromUrl(rawImageUrl, `${symbol.toLowerCase()}.png`);
+        notify(2, `Logo token IPFS siap: ${finalImageUrl}`);
+      } catch (imgErr) {
+        console.warn('[RobinhoodClankerV5] Pinata upload skipped:', imgErr.message);
+      }
+    }
+
+    const buyFee = Math.min(10, Math.max(1, Number(options.buyFee !== undefined ? options.buyFee : storage.getRobinhoodBuyFee())));
+    const sellFee = Math.min(10, Math.max(1, Number(options.sellFee !== undefined ? options.sellFee : storage.getRobinhoodSellFee())));
+
+    // Fee rewards: route 50/50 fee share to the 2 dev wallets from data/airdrop.json
+    const airdropEntries = getAirdropEntries() || [];
+    let recipients = [];
+    if (airdropEntries.length >= 2) {
+      recipients = [
+        { recipient: airdropEntries[0].account, admin: account.address, bps: 5000 },
+        { recipient: airdropEntries[1].account, admin: account.address, bps: 5000 }
+      ];
+    } else if (airdropEntries.length === 1) {
+      recipients = [
+        { recipient: airdropEntries[0].account, admin: account.address, bps: 10000 }
+      ];
+    } else {
+      recipients = [
+        { recipient: account.address, admin: account.address, bps: 10000 }
+      ];
+    }
+
+    const payload = {
+      name,
+      symbol,
+      image: finalImageUrl,
+      buyFee,
+      sellFee,
+      antiSnipeEnabled: true,
+      rewards: {
+        recipients
+      }
+    };
+
+    if (devBuyNum > 0) {
+      payload.devBuy = {
+        ethAmount: devBuyNum
+      };
+    }
+
+    notify(3, `Mempersiapkan transaksi deployment Clanker V5 di Robinhood Chain (Mining Salt cccc)...`);
+    const deployResult = await clanker.deploy(payload);
+    if (deployResult.error) {
+      throw new Error(`Clanker V5 Deploy Error: ${deployResult.error.message || JSON.stringify(deployResult.error)}`);
+    }
+
+    const txHash = deployResult.txHash;
+    const predictedAddress = deployResult.expectedAddress;
+    notify(4, `Transaksi terkirim: ${txHash}. Menunggu konfirmasi blok di Robinhood Chain...`);
+
+    const launch = await deployResult.waitForTransaction();
+    if (launch.error) {
+      throw new Error(`Konfirmasi transaksi V5 gagal: ${launch.error.message || JSON.stringify(launch.error)}`);
+    }
+
+    const tokenAddress = launch.address || predictedAddress;
+    const poolId = launch.poolId || '';
+    notify(5, `Token berhasil dideploy via Official Clanker V5! Token: ${tokenAddress}, Pool: ${poolId}`);
+
+    const record = storage.saveRobinhoodDeployedToken({
+      name,
+      symbol,
+      imageUrl: finalImageUrl,
+      totalSupply: '100000000000',
+      tokenAddress,
+      poolAddress: poolId,
+      deployerAddress: account.address,
+      feeWallet: recipients[0]?.recipient || account.address,
+      buyFee,
+      sellFee,
+      dexVersion: 'Clanker V5',
+      pairToken: 'ETH',
+      quoteDeposited: 'Official Clanker V5 Pool',
+      ethDeposited: devBuyEth,
+      targetMarketCapUsd: 0,
+      devBuyEth,
+      tokenDeposited: '100000000000',
+      deployTx: txHash,
+      launchType: 'clanker_v5',
+      isVerified: true
+    });
+
+    const blockscoutUrl = `${this.explorerUrl}/token/${tokenAddress}`;
+    const dexscreenerUrl = `https://dexscreener.com/robinhood/${poolId || tokenAddress}`;
+    const definedUrl = `https://un.defined.fi/tokens/discover?rankingBy=createdAt&rankingDirection=DESC&network=robinhood`;
+    const clankerUrl = `https://clanker.world/clanker/${tokenAddress}`;
+
+    return {
+      success: true,
+      mode: 'v5',
+      dexVersion: 'Clanker V5',
+      pairToken: 'ETH',
+      token: {
+        name,
+        symbol,
+        address: tokenAddress,
+        imageUrl: finalImageUrl,
+        totalSupply: '100000000000',
+        deployTxHash: txHash,
+        isVerified: true
+      },
+      liquidity: {
+        dexName: 'Clanker V5 Uniswap V4 Pool',
+        poolAddress: poolId,
+        quoteToken: 'ETH',
+        quoteDeposited: 'Official Clanker V5',
+        devBuyEth: devBuyNum > 0 ? `${devBuyEth} ETH` : '0 ETH',
+        tokensDeposited: '100,000,000,000 (100% Supply in Pool)',
+        txHash
+      },
+      urls: {
+        tokenExplorer: blockscoutUrl,
+        poolExplorer: `${this.explorerUrl}/address/${poolId || tokenAddress}`,
+        dexscreener: dexscreenerUrl,
+        definedFi: definedUrl,
+        clankerWorld: clankerUrl
       },
       record
     };

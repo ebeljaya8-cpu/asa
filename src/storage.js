@@ -709,6 +709,10 @@ export class Storage {
     return entry;
   }
 
+  saveRobinhoodToken(record) {
+    return this.saveRobinhoodDeployedToken(record);
+  }
+
   getRobinhoodLpEth() {
     const state = this.getState();
     return state.robinhoodLpEth ?? (config.robinhoodDefaultLpEth || 0.00001);
@@ -886,11 +890,11 @@ export class Storage {
 
   getRobinhoodDeployMode() {
     const state = this.getState();
-    return state.robinhoodDeployMode || 'direct'; // 'direct' (Mandiri Virtual Liq) | 'pons' (Official Launchpad)
+    return state.robinhoodDeployMode || 'v5'; // 'v5' (Official Clanker V5) | 'v4' (Clanker V4 Airdrop 2 Wallet)
   }
 
   setRobinhoodDeployMode(mode) {
-    const valid = mode === 'pons' ? 'pons' : 'direct';
+    const valid = (mode === 'v4' || mode === 'direct') ? 'v4' : 'v5';
     const state = this.getState();
     state.robinhoodDeployMode = valid;
     this.saveState(state);
