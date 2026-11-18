@@ -332,12 +332,12 @@ export class TelegramBotApp {
       await this.sendXRadarMenu(ctx);
     });
 
-    // /fee [3|5|10] - Mengatur fee buy & sell token (Max on-chain 10%)
+    // /fee [1|2|3|5|10] - Mengatur fee buy & sell token (Max on-chain 10%)
     bot.command('fee', async (ctx) => {
       const arg = (ctx.message.text || '').split(' ')[1];
       if (arg) {
         const val = parseInt(arg, 10);
-        if ([3, 5, 10].includes(val) || (val >= 1 && val <= 10)) {
+        if ([1, 2, 3, 5, 10].includes(val) || (val >= 1 && val <= 10)) {
           const saved = storage.setFeePercent(val);
           return ctx.replyWithHTML(
             `✅ <b>Fee Buy & Sell berhasil diubah ke ${saved}%!</b>\n\n` +
@@ -353,8 +353,8 @@ export class TelegramBotApp {
           return ctx.replyWithHTML(
             `⚠️ <b>Pilihan fee tidak valid: "${escapeHtml(arg)}"</b>\n` +
             `Smart contract Clanker v4 di Base membatasi fee maksimal 10% (1000 bps).\n` +
-            `Pilihan yang tersedia: <code>3</code>, <code>5</code>, atau <code>10</code>%.\n` +
-            `Contoh: <code>/fee 10</code>`
+            `Pilihan yang tersedia: <code>1</code>, <code>2</code>, <code>3</code>, <code>5</code>, atau <code>10</code>%.\n` +
+            `Contoh: <code>/fee 1</code> atau <code>/fee 2</code>`
           );
         }
       }
@@ -2333,6 +2333,8 @@ ${airdropDetails}
 
 Pilih fee transaksi yang akan diterapkan pada setiap token baru yang dideploy:
 
+• <b>1% (Ultra Rendah)</b>: Sangat ramah trader & scalper, memaksimalkan volume transaksi token.
+• <b>2% (Sangat Rendah)</b>: Biaya sangat bersahabat bagi trader dengan perolehan fee yang stabil.
 • <b>3% (Volume Tinggi)</b>: Biaya rendah, menarik volume trading paling tinggi dan ramah trader.
 • <b>5% (Moderat / Seimbang)</b>: Keseimbangan optimal antara likuiditas dan penerimaan fee creator.
 • <b>10% (Maksimum On-Chain Clanker v4)</b>: Batas tertinggi mutlak yang diizinkan oleh smart contract Clanker v4 di Base Network (1000 bps). Memaksimalkan perolehan fee bagi creator dari setiap buy dan sell.
@@ -2341,7 +2343,11 @@ Pilih fee transaksi yang akan diterapkan pada setiap token baru yang dideploy:
 
     await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
       [
-        Markup.button.callback(`💰 3% Fee${check(3)}`, 'set_fee_3'),
+        Markup.button.callback(`💰 1% Fee${check(1)}`, 'set_fee_1'),
+        Markup.button.callback(`💰 2% Fee${check(2)}`, 'set_fee_2'),
+        Markup.button.callback(`💰 3% Fee${check(3)}`, 'set_fee_3')
+      ],
+      [
         Markup.button.callback(`💰 5% Fee${check(5)}`, 'set_fee_5'),
         Markup.button.callback(`💰 10% Fee (Max)${check(10)}`, 'set_fee_10')
       ],
