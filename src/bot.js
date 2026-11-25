@@ -361,6 +361,74 @@ export class TelegramBotApp {
       await this.sendFeeMenu(ctx);
     });
 
+    // /feepref <tokenAddress> [fix] - Cek atau ubah preferensi fee locker (Paired -> Both)
+    bot.command('feepref', async (ctx) => {
+      const parts = (ctx.message.text || '').trim().split(/\s+/);
+      const token = parts[1];
+      const action = parts[2]?.toLowerCase();
+
+      if (!token || !token.startsWith('0x') || token.length !== 42) {
+        return ctx.replyWithHTML(
+          `ℹ️ <b>Format Perintah /feepref:</b>\n\n` +
+          `• <b>Cek preferensi fee:</b>\n<code>/feepref &lt;alamat_token&gt;</code>\n\n` +
+          `• <b>Ubah Paired → Both (Otomatis):</b>\n<code>/feepref &lt;alamat_token&gt; fix</code>\n\n` +
+          `<i>Contoh:</i>\n<code>/feepref 0x91c69557228af24e6a41c001ccc2b710660bcb07</code>`
+        );
+      }
+
+      await ctx.reply(`🔍 Memeriksa preferensi fee token ${token}...`);
+      const info = await clankerService.getFeePreferenceInfo(token);
+      if (!info.success) {
+        return ctx.replyWithHTML(`❌ <b>Gagal membaca locker:</b> ${escapeHtml(info.error)}`);
+      }
+
+      const prefText = info.prefs.map(p => `• Reward Index ${p.index}: <b>${p.prefLabel}</b> (${p.prefNumber})`).join('\n') || 'Tidak ada data preference';
+
+      if (action !== 'fix') {
+        return ctx.replyWithHTML(
+          `📊 <b>Status Fee Preference Clanker v4</b>\n\n` +
+          `• <b>Token:</b> <code>${token}</code>\n` +
+          `• <b>Locker:</b> <code>${info.locker}</code>\n\n` +
+          `${prefText}\n\n` +
+          `💡 <i>Keterangan:</i>\n` +
+          `• <b>Both (0):</b> Fee diterima langsung apa adanya (WETH + Token) tanpa swap paksa di pool. Sangat aman dan mencegah revert <code>PriceLimitAlreadyExceeded</code>.\n` +
+          `• <b>Paired (1):</b> Locker menukar fee token ke WETH di pool yang sama. Jika pool menyentuh tick ekstrem, transaksi swap akan gagal (revert).\n\n` +
+          `👉 Untuk mengubah ke <b>Both</b>, ketik:\n<code>/feepref ${token} fix</code>\n\n` +
+          `🔗 <a href="https://basescan.org/address/${info.locker}#writeContract">Buka Locker di Basescan</a>`
+        );
+      }
+
+      // Action is 'fix'
+      await ctx.reply(`⏳ Mengirim transaksi updateFeePreference Paired → Both via Wallet Bot...`);
+      const updateRes = await clankerService.updateFeePreference(token, 0, 0, 1);
+      if (updateRes.success) {
+        return ctx.replyWithHTML(
+          `✅ <b>Berhasil Diubah ke Both!</b>\n\n` +
+          `• <b>Token:</b> <code>${token}</code>\n` +
+          `• <b>Status Sekarang:</b> Both (0)\n` +
+          `• <b>Tx Hash:</b> <a href="https://basescan.org/tx/${updateRes.txHash}">Lihat di Basescan</a>\n\n` +
+          `Sekarang swap/buy di pool tidak akan revert lagi!`
+        );
+      } else {
+        const isUnauthorized = updateRes.error?.includes('Unauthorized') || updateRes.error?.includes('0x82b42900');
+        const reason = isUnauthorized 
+          ? `Wallet bot saat ini bukan wallet deployer/admin dari token ini.` 
+          : updateRes.error;
+
+        return ctx.replyWithHTML(
+          `⚠️ <b>Tidak dapat mengubah otomatis dari wallet bot:</b>\n${escapeHtml(reason)}\n\n` +
+          `🛠️ <b>Solusi Manual via Basescan:</b>\n` +
+          `1. Buka contract Locker:\n👉 <a href="https://basescan.org/address/${info.locker}#writeContract">Basescan Locker (${info.locker.slice(0, 8)}...)</a>\n` +
+          `2. Klik <b>Connect to Web3</b> (hubungkan wallet deployer token ini)\n` +
+          `3. Cari fungsi <b>updateFeePreference</b>:\n` +
+          `   - <code>token</code>: <code>${token}</code>\n` +
+          `   - <code>rewardIndex</code>: <code>0</code>\n` +
+          `   - <code>newFeePreference</code>: <code>0</code>\n` +
+          `4. Klik <b>Write</b> dan konfirmasi transaksi.`
+        );
+      }
+    });
+
     // /autodeploy [on|off|all|primary]
     bot.command('autodeploy', async (ctx) => {
       const text = ctx.message.text.split(' ')[1]?.toLowerCase();

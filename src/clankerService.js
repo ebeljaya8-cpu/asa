@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http, formatEther, formatGwei, parseGwei, keccak256, stringToHex } from 'viem';
+import { createPublicClient, createWalletClient, http, formatEther, formatGwei, parseGwei, keccak256, stringToHex, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { Clanker } from 'clanker-sdk/v4';
@@ -612,6 +612,96 @@ export class ClankerService {
     }
 
     return results;
+  }
+
+  /**
+   * Get fee preferences for a Clanker v4 token
+   */
+  async getFeePreferenceInfo(tokenAddress) {
+    const CLANKER_FACTORY = '0xe85a59c628f7d27878aceb4bf3b35733630083a9';
+    const factoryAbi = parseAbi([
+      'struct DeploymentInfo { address token; address hook; address locker; address[] extensions; }',
+      'function tokenDeploymentInfo(address token) view returns (DeploymentInfo)'
+    ]);
+    const lockerAbi = parseAbi([
+      'function feePreferences(address token, uint256 index) view returns (uint8)'
+    ]);
+    const FEE_IN = ['Both', 'Paired', 'Clanker'];
+
+    try {
+      const info = await this.publicClient.readContract({
+        address: CLANKER_FACTORY,
+        abi: factoryAbi,
+        functionName: 'tokenDeploymentInfo',
+        args: [tokenAddress]
+      });
+
+      if (!info.locker || info.locker === '0x0000000000000000000000000000000000000000') {
+        return { success: false, error: 'Token bukan token Clanker v4 atau locker tidak ditemukan.' };
+      }
+
+      const prefs = [];
+      for (let i = 0; i < 5; i++) {
+        try {
+          const pref = await this.publicClient.readContract({
+            address: info.locker,
+            abi: lockerAbi,
+            functionName: 'feePreferences',
+            args: [tokenAddress, BigInt(i)]
+          });
+          prefs.push({ index: i, prefNumber: pref, prefLabel: FEE_IN[pref] ?? String(pref) });
+        } catch (e) {
+          break;
+        }
+      }
+
+      return {
+        success: true,
+        locker: info.locker,
+        hook: info.hook,
+        prefs
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Update fee preference on Clanker v4 locker
+   */
+  async updateFeePreference(tokenAddress, rewardIndex = 0, newPref = 0, walletIndex = 1) {
+    const infoRes = await this.getFeePreferenceInfo(tokenAddress);
+    if (!infoRes.success) return infoRes;
+
+    const w = this.getWallet(walletIndex);
+    if (!w || !w.walletClient || !w.account) {
+      return { success: false, error: `Wallet ${walletIndex} tidak memiliki private key.` };
+    }
+
+    const lockerAbi = parseAbi([
+      'function updateFeePreference(address token, uint256 rewardIndex, uint8 newFeePreference)'
+    ]);
+
+    try {
+      const hash = await w.walletClient.writeContract({
+        address: infoRes.locker,
+        abi: lockerAbi,
+        functionName: 'updateFeePreference',
+        args: [tokenAddress, BigInt(rewardIndex), newPref]
+      });
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash, timeout: 60000 });
+      return {
+        success: receipt.status === 'success',
+        txHash: hash,
+        locker: infoRes.locker
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err.shortMessage || err.message,
+        locker: infoRes.locker
+      };
+    }
   }
 }
 
